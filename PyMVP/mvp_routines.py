@@ -40,7 +40,6 @@ from scipy.signal import butter, freqz
 from scipy import signal
 import gsw
 from scipy.interpolate import pchip_interpolate
-import similaritymeasures
 from netCDF4 import Dataset
 from scipy.signal import butter, filtfilt, correlate, correlation_lags
 
