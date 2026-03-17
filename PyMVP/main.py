@@ -1,7 +1,7 @@
 ##########################################################################
-# MVPAnalyzer/main.py
+# PyMVP/main.py
 # Author: Maximilien Wemaere (LMD/CNRS)
-# Date: August 2025
+# Date: March 2026
 #
 #
 # Simple routines to load, analyze and correct data from a Moving Vessel Profiler (MVP) 300
