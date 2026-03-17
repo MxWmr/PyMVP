@@ -10,7 +10,7 @@ It is stille in progress until WHIRLS mission in  june-july 2026
 This package is avalaible on PyPi
 ``` pip install PyMVP ```
 
-(if you use conda environment, be sure to use a pip of your environment with ''' conda install pip''' and '''which pip''')
+(if you use conda environment, be sure to use a pip of your environment with ``` conda install pip``` and ```which pip```
 
 
 For V0.1.0, it will be avalaible on conda
