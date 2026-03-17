@@ -36,7 +36,7 @@ from scipy.ndimage import median_filter
 
   
 class Analyzer:
-    def __init__(self, data_path, output_path=None, subdirs=False,  Yorig=1950):
+    def __init__(self, Yorig=1950):
         """
         Initialize the analyzer with the data path and reference year.
         Args:
@@ -46,14 +46,11 @@ class Analyzer:
         """
         self.Yorig = Yorig
         self.date_ref = datetime(Yorig, 1, 1)
-        self.data_path = data_path
-        self.output_path = output_path if output_path is not None else data_path
-        self.subdirs = subdirs
         self.mvp = False
         self.ctd = False
 
 
-    def load_mvp_data(self,delp=[],data_path=None,format='raw',only_new=False):
+    def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None):
         """
         Load MVP data from .raw and .log files in the data_path folder.
         Fills the object attributes with data matrices and associated metadata.
@@ -61,8 +58,9 @@ class Analyzer:
             delp (list): Indices of profiles to remove from the list (optional).
             data_path (str): Path to the folder containing MVP files (optional).
         """
-        if data_path is not None:
-            self.data_path = data_path
+        self.data_path = data_path
+        self.subdirs = subdirs
+        self.output_path = output_path
 
         if format=='raw':
             if self.subdirs:
@@ -300,7 +298,7 @@ class Analyzer:
 
 
 
-    def load_mvp_data_again(self,data_path=None,format='raw',delp=[]):
+    def load_mvp_data_again(self,data_path,format='raw',delp=[]):
         """
         Load MVP data from .raw and .log files in the data_path folder.
         Fills the object attributes with data matrices and associated metadata.
@@ -308,14 +306,13 @@ class Analyzer:
             data_path (str): Path to the folder containing MVP files.
             delp (list): Indices of profiles to remove from the list (optional).
         """
-        if data_path is not None:
-            self.data_path = data_path
+
 
         if format=='raw':
-            files = sorted(filter(os.path.isfile,glob.glob(self.data_path + '*.raw', recursive=True)))
+            files = sorted(filter(os.path.isfile,glob.glob(data_path + '*.raw', recursive=True)))
         elif format=='ncdf':
-            files = sorted(filter(os.path.isfile,glob.glob(self.data_path + '**/MVP*.nc', recursive=True)))
-        print('Found ' + str(len(files)) + ' MVP files in the directory: ' + self.data_path)
+            files = sorted(filter(os.path.isfile,glob.glob(data_path + '**/MVP*.nc', recursive=True)))
+        print('Found ' + str(len(files)) + ' MVP files in the directory: ' + data_path)
 
 
 
@@ -631,11 +628,6 @@ class Analyzer:
 
             
 
-
-
-
-
-
     def compute_waterflow(self,horizontal_speed=2,corr=False):
         """
         Compute the water flow speed (u,v) from the horizontal speed and the direction of the profiles.
@@ -938,7 +930,7 @@ class Analyzer:
         plt.xlabel('Fluorescence, ug/L')
         plt.ylabel('Pressure, dbar')
 
-    def plot_diagramTS_raw(self,id_mvp=None,id_ctd=None,correction=False):
+    def plot_diagramTS(self,id_mvp=None,id_ctd=None,correction=False):
         """
         Plot the TS diagram (Salinity vs Temperature) for one or more profiles, with isopycnals.
         Args:
@@ -1314,7 +1306,6 @@ class Analyzer:
             plt.show()
 
 
-
     def mvp_correction(self,high_cutoff=1,dp=0.1):
 
         T_MVP_corr = []
@@ -1421,7 +1412,7 @@ class Analyzer:
         print('CTD data interpolated onto corrected MVP pressure levels.')
 
 
-    def to_netcdf(self, filepath=None, corrected=False, compression=True, engine=None, per_profile_files=False):
+    def to_netcdf(self, filepath, corrected=False, compression=True, engine=None, per_profile_files=False):
         """
         Export MVP data to a NetCDF file using xarray.
 
@@ -1606,17 +1597,13 @@ class Analyzer:
             elif engine == 'h5netcdf':
                 encoding = {name: {'compression': 'gzip', 'compression_opts': 4} for name in data_vars.keys()}
 
-        # Determine output base directory
-        if filepath is None:
-            base_dir = self.output_path if hasattr(self, 'output_path') else os.getcwd() + os.sep
-        else:
-            # If a full file path was provided and not per_profile_files, honor it
-            if (not per_profile_files) and filepath.lower().endswith('.nc'):
-                out_path = filepath
-                ds.to_netcdf(out_path, encoding=encoding, engine=engine)
-                print(f"NetCDF written: {out_path} using engine={engine}")
-                return
-            base_dir = filepath
+
+        if (not per_profile_files) and filepath.lower().endswith('.nc'):
+            out_path = filepath
+            ds.to_netcdf(out_path, encoding=encoding, engine=engine)
+            print(f"NetCDF written: {out_path} using engine={engine}")
+            return
+        base_dir = filepath
 
         if not base_dir.endswith(os.sep):
             base_dir = base_dir + os.sep
