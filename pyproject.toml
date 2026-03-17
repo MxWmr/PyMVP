@@ -1,11 +1,12 @@
 [project]
 name = "PyMVP"
-version = "0.1.4"
+version = "0.1.6"
 description = "Python package for Moving Vessel Profiler correction and analysis"
 authors = [{name="MaximilienWemaere"}]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "setuptools>=82.0",
     "numpy>=1.24",
     "seabird>=0.12.0",
     "matplotlib>=3.10.6",
@@ -15,6 +16,7 @@ dependencies = [
     "scipy>=1.16.2",
     "xarray>=2025.9.1",
     "netcdf4>=1.7.2",
+    "pkg_ressources',
 ]
 
 
