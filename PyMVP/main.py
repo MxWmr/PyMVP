@@ -27,7 +27,6 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import os
 import gsw
-from seabird.cnv import fCNV
 from tqdm import tqdm
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -554,9 +553,9 @@ class Analyzer:
         self.mvp = True
 
 
-    def load_ctd_data(self,data_path_ctd,format='cnv'):
+    def load_ctd_data(self,data_path_ctd):
         """
-        Load CTD data from .cnv files in the data_path_ctd folder.
+        Load CTD data from .nc files in the data_path_ctd folder.
         Fills the object attributes with data matrices and associated metadata.
         Args:
             data_path_ctd (str): Path to the folder containing CTD files.
@@ -588,163 +587,54 @@ class Analyzer:
         DATETIME_ctd = []
         SALT_ctd_temp = []
 
-        if format=='ncdf':
-            for f in list_of_ctd_files:
-                nc = xr.open_dataset(f)
-                PRES_ctd_temp.append(nc['PRES'].values[0])
-                PRES_ctd_temp.append(nc['PRES'].values[1])
-                TEMP_ctd_temp.append(nc['TEMP'].values[0])
-                TEMP_ctd_temp.append(nc['TEMP'].values[1])
-                COND_ctd_temp.append(nc['COND'].values[0])
-                COND_ctd_temp.append(nc['COND'].values[1])
-                SALT_ctd_temp.append(nc['SAL'].values[0])
-                SALT_ctd_temp.append(nc['SAL'].values[1])
-                TURB_ctd_temp.append(nc['TURB'].values[0])
-                TURB_ctd_temp.append(nc['TURB'].values[1])
-                OXY_ctd_temp.append(nc['OXY'].values[0])
-                OXY_ctd_temp.append(nc['OXY'].values[1])
-                FLUO_ctd_temp.append(nc['FLUO'].values[0])
-                FLUO_ctd_temp.append(nc['FLUO'].values[1])
-                CDOM_ctd_temp.append(nc['CDOM'].values[0])
-                CDOM_ctd_temp.append(nc['CDOM'].values[1])
-                LAT_ctd_temp.append(nc['LATITUDE'].values[0])
-                LAT_ctd_temp.append(nc['LATITUDE'].values[1])
-                LON_ctd_temp.append(nc['LONGITUDE'].values[0])
-                LON_ctd_temp.append(nc['LONGITUDE'].values[1])
-                DATETIME_ctd.append(nc['profile_time'].values[0])
+        for f in list_of_ctd_files:
+            nc = xr.open_dataset(f)
+            PRES_ctd_temp.append(nc['PRES'].values[0])
+            PRES_ctd_temp.append(nc['PRES'].values[1])
+            TEMP_ctd_temp.append(nc['TEMP'].values[0])
+            TEMP_ctd_temp.append(nc['TEMP'].values[1])
+            COND_ctd_temp.append(nc['COND'].values[0])
+            COND_ctd_temp.append(nc['COND'].values[1])
+            SALT_ctd_temp.append(nc['SAL'].values[0])
+            SALT_ctd_temp.append(nc['SAL'].values[1])
+            TURB_ctd_temp.append(nc['TURB'].values[0])
+            TURB_ctd_temp.append(nc['TURB'].values[1])
+            OXY_ctd_temp.append(nc['OXY'].values[0])
+            OXY_ctd_temp.append(nc['OXY'].values[1])
+            FLUO_ctd_temp.append(nc['FLUO'].values[0])
+            FLUO_ctd_temp.append(nc['FLUO'].values[1])
+            CDOM_ctd_temp.append(nc['CDOM'].values[0])
+            CDOM_ctd_temp.append(nc['CDOM'].values[1])
+            LAT_ctd_temp.append(nc['LATITUDE'].values[0])
+            LAT_ctd_temp.append(nc['LATITUDE'].values[1])
+            LON_ctd_temp.append(nc['LONGITUDE'].values[0])
+            LON_ctd_temp.append(nc['LONGITUDE'].values[1])
+            DATETIME_ctd.append(nc['profile_time'].values[0])
 
-                nc.close()
+            nc.close()
 
-            self.PRES_ctd = np.array(PRES_ctd_temp)
-            self.TEMP_ctd = np.array(TEMP_ctd_temp)
-            self.COND_ctd = np.array(COND_ctd_temp)
-            self.SALT_ctd = np.array(SALT_ctd_temp)
-            self.TURB_ctd = np.array(TURB_ctd_temp)
-            self.OXY_ctd = np.array(OXY_ctd_temp)
-            self.FLUO_ctd = np.array(FLUO_ctd_temp)
-            self.CDOM_ctd = np.array(CDOM_ctd_temp)
-            self.LAT_ctd = np.array(LAT_ctd_temp)
-            self.LON_ctd = np.array(LON_ctd_temp)
-            self.DATETIME_ctd = np.array(DATETIME_ctd)
+        self.PRES_ctd = np.array(PRES_ctd_temp)
+        self.TEMP_ctd = np.array(TEMP_ctd_temp)
+        self.COND_ctd = np.array(COND_ctd_temp)
+        self.SALT_ctd = np.array(SALT_ctd_temp)
+        self.TURB_ctd = np.array(TURB_ctd_temp)
+        self.OXY_ctd = np.array(OXY_ctd_temp)
+        self.FLUO_ctd = np.array(FLUO_ctd_temp)
+        self.CDOM_ctd = np.array(CDOM_ctd_temp)
+        self.LAT_ctd = np.array(LAT_ctd_temp)
+        self.LON_ctd = np.array(LON_ctd_temp)
+        self.DATETIME_ctd = np.array(DATETIME_ctd)
 
-
-            print('CTD data loaded successfully.')
-            self.ctd = True
-
-            return
-            
-
-
-
-
-
-        for ctd_dat_name in tqdm(list_of_ctd_files[0:]):
-            ctd_files = ctd_dat_name
-
-            cnv = fCNV(ctd_files)
-
-            Lat_up,Lat_down = split_ctd(cnv['PRES'], cnv['LATITUDE'])
-            Lon_up,Lon_down = split_ctd(cnv['PRES'], cnv['LONGITUDE'])
-            Pres_up,Pres_down = split_ctd(cnv['PRES'], cnv['PRES'])
-            Temp_up,Temp_down = split_ctd(cnv['PRES'], cnv['TEMP'])
-            Cond_up,Cond_down = split_ctd(cnv['PRES'], cnv['CNDC']*10)
-            Turb_up,Turb_down = split_ctd(cnv['PRES'], cnv['turbWETntu0'])
-            Oxy_up,Oxy_down = split_ctd(cnv['PRES'],np.array([a/b*100 for a,b in zip(cnv['oxygen_ml_L'], cnv['oxsolML/L'])]))
-            Fluo_up,Fluo_down = split_ctd(cnv['PRES'], cnv['flECO-AFL'])
-            Cdom_up,Cdom_down = split_ctd(cnv['PRES'], cnv['wetCDOM'])
-            Salt_up,Salt_down = split_ctd(cnv['PRES'], gsw.SP_from_C(cnv['CNDC']*10, cnv['TEMP'], cnv['PRES']))
-    
-
-
-
-
-            LAT_ctd_temp.append(Lat_down)
-            LAT_ctd_temp.append(Lat_up)
-            LON_ctd_temp.append(Lon_down)
-            LON_ctd_temp.append(Lon_up)
-            PRES_ctd_temp.append(Pres_down)
-            PRES_ctd_temp.append(Pres_up)
-            TEMP_ctd_temp.append(Temp_down)
-            TEMP_ctd_temp.append(Temp_up)
-            COND_ctd_temp.append(Cond_down)
-            COND_ctd_temp.append(Cond_up)
-            TURB_ctd_temp.append(Turb_down)
-            TURB_ctd_temp.append(Turb_up)
-            OXY_ctd_temp.append(Oxy_down)
-            OXY_ctd_temp.append(Oxy_up)
-            FLUO_ctd_temp.append(Fluo_down)
-            FLUO_ctd_temp.append(Fluo_up)
-            CDOM_ctd_temp.append(Cdom_down)
-            CDOM_ctd_temp.append(Cdom_up)
-            SALT_ctd_temp.append(Salt_down)
-            SALT_ctd_temp.append(Salt_up)
-
-
-
-
-            with open(ctd_dat_name, 'r') as f:
-                header_lines = []
-                for _ in range(10): 
-                    header_lines.append(f.readline().strip())
-
-            line = header_lines[9]
-            date_str = line.split('=')[1].strip()
-            dt = datetime.strptime(date_str, "%b %d %Y %H:%M:%S")
-            DATETIME_ctd.append(dt)
-
-        # Re-arange files into matrices
-        M_size = 0
-        for i in range(len(PRES_ctd_temp)):
-            M_size = max(M_size, len(PRES_ctd_temp[i]))
-            
-        PRES_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        COND_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        SALT_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        TEMP_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        TURB_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        OXY_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        FLUO_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        CDOM_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        LAT_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        LON_ctd = np.zeros(( len(PRES_ctd_temp), M_size))
-        PRES_ctd[:] = np.nan
-        COND_ctd[:] = np.nan
-        SALT_ctd[:] = np.nan    
-        TEMP_ctd[:] = np.nan
-        TURB_ctd[:] = np.nan
-        OXY_ctd[:] = np.nan
-        FLUO_ctd[:] = np.nan
-        CDOM_ctd[:] = np.nan
-        LAT_ctd[:] = np.nan
-        LON_ctd[:] = np.nan
-        del M_size
-        for i in range(len(PRES_ctd_temp)):
-            LAT_ctd[i,0:len(PRES_ctd_temp[i])] = LAT_ctd_temp[i]
-            LON_ctd[i,0:len(PRES_ctd_temp[i])] = LON_ctd_temp[i]
-            PRES_ctd[i,0:len(PRES_ctd_temp[i])] = PRES_ctd_temp[i]
-            TEMP_ctd[i,0:len(PRES_ctd_temp[i])] = TEMP_ctd_temp[i]
-            COND_ctd[i,0:len(PRES_ctd_temp[i])] = COND_ctd_temp[i]
-            SALT_ctd[i,0:len(PRES_ctd_temp[i])] = SALT_ctd_temp[i]
-            TURB_ctd[i,0:len(PRES_ctd_temp[i])] = TURB_ctd_temp[i]
-            OXY_ctd[i,0:len(PRES_ctd_temp[i])] = OXY_ctd_temp[i]   
-            FLUO_ctd[i,0:len(PRES_ctd_temp[i])] = FLUO_ctd_temp[i]
-            CDOM_ctd[i,0:len(PRES_ctd_temp[i])] = CDOM_ctd_temp[i]
-        del PRES_ctd_temp, TEMP_ctd_temp, COND_ctd_temp, SALT_ctd_temp, TURB_ctd_temp, OXY_ctd_temp, FLUO_ctd_temp, CDOM_ctd_temp, LAT_ctd_temp, LON_ctd_temp
-
-        self.PRES_ctd = PRES_ctd
-        self.TEMP_ctd = TEMP_ctd
-        self.COND_ctd = COND_ctd
-        self.SALT_ctd = SALT_ctd
-        self.TURB_ctd = TURB_ctd
-        self.OXY_ctd = OXY_ctd
-        self.FLUO_ctd = FLUO_ctd
-        self.CDOM_ctd = CDOM_ctd
-        self.LAT_ctd = LAT_ctd
-        self.LON_ctd = LON_ctd
-        self.DATETIME_ctd = DATETIME_ctd
 
         print('CTD data loaded successfully.')
         self.ctd = True
+
+            return 
+            
+
+
+
+
 
 
     def compute_waterflow(self,horizontal_speed=2,corr=False):
