@@ -4,5 +4,7 @@ version = "0.1.0"
 description = "Python package for Moving Vessel Profiler correction and analysis"
 authors = [{name="MaximilienWemaere"}]
 readme = "README.md"
-requires-python = ">=3.8"
-
+requires-python = ">=3.10"
+dependencies = [
+    "requests"
+]
