@@ -629,7 +629,6 @@ class Analyzer:
         print('CTD data loaded successfully.')
         self.ctd = True
 
-            return 
             
 
 
