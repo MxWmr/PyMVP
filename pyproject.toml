@@ -1,6 +1,6 @@
 [project]
 name = "PyMVP"
-version = "0.2.0"
+version = "0.2.1"
 description = "Python package for Moving Vessel Profiler correction and analysis"
 authors = [{name="MaximilienWemaere"}]
 readme = "README.md"
