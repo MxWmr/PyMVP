@@ -36,12 +36,11 @@ import scipy.stats as st
 from datetime import date
 from datetime import datetime
 from scipy import interpolate
-from scipy.signal import butter, freqz
 from scipy import signal
 import gsw
-from scipy.interpolate import pchip_interpolate
+from scipy.interpolate import interp1d
 from netCDF4 import Dataset
-from scipy.signal import butter, filtfilt, correlate, correlation_lags
+from scipy.signal import butter, filtfilt, correlate, correlation_lags,savgol_filter
 
 #
 ################################################################################
@@ -993,3 +992,85 @@ def bin_average_v2(P,T,C,S,time,dp=0.05):
             np.array(C_bin),
             np.array(S_bin),
             np.array(time_bin))
+
+
+
+
+
+
+
+def align_profiles(P, T_ref, T_to_align_raw, min_depth=0,max_shift=20):
+    """
+    Pipeline complet :
+    - estime ΔP
+    - recale
+    - estime ΔT
+    - corrige
+    """
+
+    ### 1. calcul delta de pression
+
+    # Masque pour exclure les valeurs non finies
+    mask_nan = (
+    np.isfinite(P) &
+    np.isfinite(T_ref) &
+    np.isfinite(T_to_align_raw)
+    )
+
+    P = P[mask_nan]
+    T_ref = T_ref[mask_nan]
+    T_to_align = T_to_align_raw[mask_nan]
+
+    # Masque pour exclure la surface
+    mask = P >= min_depth
+
+    P = P[mask]
+    T_ref = T_ref[mask]
+    T_to_align = T_to_align[mask]
+
+    # Lissage léger
+    T1s = savgol_filter(T_ref, 11, 2)
+    T2s = savgol_filter(T_to_align, 11, 2)
+
+    # Gradients
+    dT1 = np.gradient(T1s, P)
+    dT2 = np.gradient(T2s, P)
+
+    # Normalisation (important pour corrélation)
+    dT1 = (dT1 - np.mean(dT1)) / np.std(dT1)
+    dT2 = (dT2 - np.mean(dT2)) / np.std(dT2)
+
+    # Corrélation
+    corr = correlate(dT2, dT1, mode='full')
+    lags = np.arange(-len(dT1)+1, len(dT1))
+
+    # Convertir en décalage en pression
+    dP = np.mean(np.diff(P))
+    shifts = lags * dP
+
+    # Limiter les shifts plausibles
+    valid = np.abs(shifts) <= max_shift
+
+    deltaP = shifts[valid][np.argmax(corr[valid])]
+
+    ### 2. recalage pression
+    f = interp1d(P + deltaP, T_to_align, bounds_error=False, fill_value=np.nan)
+    T_shifted = f(P)
+
+    ### 3. calcul delta de température
+    mask = (P >= min_depth) & np.isfinite(T_ref) & np.isfinite(T_shifted)
+    deltaT = np.median(T_shifted[mask] - T_ref[mask])
+
+    ### 4. recalage thermique
+    T_corrected = T_shifted - deltaT
+
+    mask_corrected = np.isfinite(T_corrected)
+
+    # copie pour ne pas modifier l'original directement
+    T_out = T_to_align_raw.copy()
+
+    # injection uniquement là où c’est valide
+    T_out_indices = np.where(mask_nan)[0]
+    T_out[T_out_indices[mask_corrected]] = T_corrected[mask_corrected]
+
+    return T_out, deltaP, deltaT

@@ -48,6 +48,8 @@ class Analyzer:
         self.date_ref = datetime(Yorig, 1, 1)
         self.mvp = False
         self.ctd = False
+        self.speed = False
+        self.corrected = False
 
 
     def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None):
@@ -559,12 +561,9 @@ class Analyzer:
         """
 
 
-        if format=='cnv':
-            list_of_ctd_files = sorted(filter(os.path.isfile,\
-                            glob.glob(data_path_ctd + '*.cnv')))
-        elif format=='ncdf':
-            list_of_ctd_files = sorted(filter(os.path.isfile,\
-                            glob.glob(data_path_ctd + 'CTD'+'*.nc')))
+        list_of_ctd_files = sorted(filter(os.path.isfile,\
+                        glob.glob(data_path_ctd + 'CTD'+'*.nc')))
+        
         print('Found ' + str(len(list_of_ctd_files)) + ' CTD files in the directory: ' + data_path_ctd)
 
 
@@ -647,6 +646,7 @@ class Analyzer:
 
             self.SPEED_mvp = SPEED_MVP
         print('Water flow speed computed successfully.')
+        self.speed = True
 
     def print_profile_metadata(self):
         """
@@ -1226,7 +1226,7 @@ class Analyzer:
             print(f"  MVP down: {rmse_cond_down:.4f} S/m (deep: {rmse_cond_down_deep:.4f} S/m)")
             print(f"  MVP up:   {rmse_cond_up:.4f} S/m (deep: {rmse_cond_up_deep:.4f} S/m)")
 
-    def correct_oxygen(self,id_mvp=None,id_ctd=None,num_sample=500,plotting=False,correction=False):
+    def correct_oxygen(self,id_mvp=None,id_ctd=None,num_sample=500,plotting=False,):
         """
         Apply oxygen correction to MVP dissolved oxygen profiles thanks to CTD data.
         Args:
@@ -1287,9 +1287,9 @@ class Analyzer:
         rmse_after_full = np.mean(np.sqrt(np.nanmean((DO_mvp_corr_full_interp - DO_ctd_interp)**2,axis=1)))
         print(f"RMSE after correction (full profile): {rmse_after_full:.4f}")
 
+        self.DO_mvp_raw = self.DO_mvp.copy()
+        self.DO_mvp = DO_mvp_corr_full
 
-        if correction:
-            self.DO_mvp = DO_mvp_corr_full
 
         if plotting:
 
@@ -1359,7 +1359,7 @@ class Analyzer:
         self.COND_mvp_corr = {i: sublist for i, sublist in enumerate(C_MVP_corr)}
         self.SALT_mvp_corr = {i: sublist for i, sublist in enumerate(S_MVP_corr)}
         self.TIME_mvp_corr = {i: sublist for i, sublist in enumerate(Time_MVP_corr)}
-
+        self.corrected = True
 
         print("MVP profiles corrected.")
 
@@ -1371,6 +1371,11 @@ class Analyzer:
         """
         if not self.ctd:
             raise ValueError("CTD data not loaded.")
+    
+        if not self.corrected:
+            raise ValueError("MVP data not corrected. Apply corrections first.")
+        
+
 
         if not hasattr(self, 'PRES_mvp_corr'):
             raise ValueError("Corrected MVP data not available. Apply corrections first.")
@@ -1388,8 +1393,9 @@ class Analyzer:
         max_lensalt = max([len(p) for p in self.SALT_mvp_corr.values()])
         SALT_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lensalt - len(row)) for row in self.SALT_mvp_corr.values()])
 
-        max_lenvspd = max([len(p) for p in self.SPEED_mvp_corr.values()])
-        SPEED_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lenvspd - len(row)) for row in self.SPEED_mvp_corr.values()])
+        if self.speed:
+            max_lenvspd = max([len(p) for p in self.SPEED_mvp_corr.values()])
+            SPEED_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lenvspd - len(row)) for row in self.SPEED_mvp_corr.values()])
 
         max_lentime = max([len(p) for p in self.TIME_mvp_corr.values()])
         TIME_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lentime - len(row)) for row in self.TIME_mvp_corr.values()])
@@ -1397,19 +1403,120 @@ class Analyzer:
 
         pressure_grid = np.linspace(np.nanmin(PRES_mvp_corr_mat), np.nanmax(PRES_mvp_corr_mat), length)
 
-        self.TEMP_ctd_on_mvp = mvp.vertical_interp(self.PRES_ctd, self.TEMP_ctd, pressure_grid)
-        self.PRES_ctd_on_mvp = mvp.vertical_interp(self.PRES_ctd, self.PRES_ctd, pressure_grid)
-        self.COND_ctd_on_mvp = mvp.vertical_interp(self.PRES_ctd, self.COND_ctd, pressure_grid)
-        self.SALT_ctd_on_mvp = mvp.vertical_interp(self.PRES_ctd, self.SALT_ctd, pressure_grid)
-        self.OXY_ctd_on_mvp = mvp.vertical_interp(self.PRES_ctd, self.OXY_ctd, pressure_grid)
+        self.TEMP_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TEMP_ctd, pressure_grid)
+        self.PRES_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.PRES_ctd, pressure_grid)
+        self.COND_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.COND_ctd, pressure_grid)
+        self.SALT_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.SALT_ctd, pressure_grid)
+        self.DO_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.OXY_ctd, pressure_grid)
+        self.FLUO_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.FLUO_ctd, pressure_grid)
+        self.TURB_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TURB_ctd, pressure_grid)
         self.TEMP_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, TEMP_mvp_corr_mat, pressure_grid)
         self.PRES_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, PRES_mvp_corr_mat, pressure_grid)
         self.COND_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, COND_mvp_corr_mat, pressure_grid)
         self.SALT_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SALT_mvp_corr_mat, pressure_grid)
-        self.SPEED_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SPEED_mvp_corr_mat, pressure_grid)
+        self.DO_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.DO_mvp, pressure_grid)
+        self.FLUO_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.FLUO_mvp, pressure_grid)
+        self.TURB_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.TURB_mvp, pressure_grid)
+        self.PH_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.PH_mvp, pressure_grid)
+        self.SUNA_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.SUNA_mvp, pressure_grid)
+
+        if self.speed:
+            self.SPEED_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SPEED_mvp_corr_mat, pressure_grid)
         self.TIME_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, TIME_mvp_corr_mat, pressure_grid)
 
         print('CTD data interpolated onto corrected MVP pressure levels.')
+
+
+    def corrige_MVP_offset_on_ctd_exact(self,id_mvp,id_ctd,min_depth=-1):
+        """
+        This function corrects the offset between the MVP and CTD profiles by aligning the temperature, conductivity profiles. It calculates the mean difference in temperature between the two profiles and applies this correction to the CTD temperature data.
+        id_mvp and id_ctd must be the same length as each MVP profile will be be corrected with the corresponding CTD profile. The function returns the corrected MVP temperature and conductivity profiles.
+        This version of the correction suppose that CTD and MVP should be exactly the same profile (same location, same time). If it not the case, you shouldf use the other function _imple
+        """
+
+        mean_temp_diff = []
+        mean_cond_diff = []
+
+        print("Calculating mean differences between MVP and CTD profiles before correction:")
+        for i in range(len(id_mvp)):
+            # Calculate the mean difference in temperature between the MVP and CTD profiles
+            temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i]] - self.TEMP_ctd_interp[id_ctd[i]])
+            mean_temp_diff.append(temp_diff)
+
+            cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i]] - self.COND_ctd_interp[id_ctd[i]])
+            mean_cond_diff.append(cond_diff)
+        print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
+        print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+
+        for i in range(len(id_mvp)):
+            self.TEMP_mvp_corr_interp[id_mvp[i]] = mvp.align_profiles(self.PRES_mvp_corr_interp[id_mvp[i]], self.TEMP_ctd_interp[id_ctd[i]], self.TEMP_mvp_corr_interp[id_mvp[i]],min_depth)[0]
+            self.COND_mvp_corr_interp[id_mvp[i]] = mvp.align_profiles(self.PRES_mvp_corr_interp[id_mvp[i]], self.COND_ctd_interp[id_ctd[i]], self.COND_mvp_corr_interp[id_mvp[i]],min_depth)[0]
+
+
+        mean_temp_diff = []
+        mean_cond_diff = []
+        print("After correction:")
+        for i in range(len(id_mvp)):
+            # Calculate the mean difference in temperature between the MVP and CTD profiles
+            temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i]] - self.TEMP_ctd_interp[id_ctd[i]])
+            mean_temp_diff.append(temp_diff)
+
+            cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i]] - self.COND_ctd_interp[id_ctd[i]])
+            mean_cond_diff.append(cond_diff)
+        print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
+        print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+    
+
+
+def corrige_MVP_offset_on_ctd_simple(self,id_mvp,id_ctd,min_depth):
+    """
+    This function corrects the offset between the MVP and CTD profiles by aligning the temperature, conductivity profiles. It calculates the mean difference in temperature between the two profiles and applies this correction to the CTD temperature data.
+    id_mvp and id_ctd must be the same length as each MVP profile will be be corrected with the corresponding CTD profile. The function returns the corrected MVP temperature and conductivity profiles.
+    This version of the correction is less restritive than the other one, does not need the CTD aand MVP profiles to be exactly similar
+    We advice to choose a min_depth that avoid to take into acount the surface layer which can introduce errors.
+    """
+
+    mean_temp_diff = []
+    mean_cond_diff = []
+    print("Calculating mean differences between MVP and CTD profiles before correction:")
+    for i in range(len(id_mvp)):
+        id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
+        # Calculate the mean difference in temperature between the MVP and CTD profiles
+        temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
+        mean_temp_diff.append(temp_diff)
+
+        cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
+        mean_cond_diff.append(cond_diff)
+    print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
+    print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+
+    for i in range(len(id_mvp)):
+        id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
+
+        # Calculate the mean difference in temperature between the MVP and CTD profiles
+        temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
+        self.TEMP_mvp_corr_interp[id_mvp[i]] -= temp_diff
+
+        cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
+        self.COND_mvp_corr_interp[id_mvp[i]] -= cond_diff
+
+
+    mean_temp_diff = []
+    mean_cond_diff = []
+    print("After correction:")
+    for i in range(len(id_mvp)):
+        id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
+
+        # Calculate the mean difference in temperature between the MVP and CTD profiles
+        temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
+        mean_temp_diff.append(temp_diff)
+
+        cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
+        mean_cond_diff.append(cond_diff)
+    print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
+    print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+   
+
 
 
     def to_netcdf(self, filepath, corrected=False, compression=True, engine=None, per_profile_files=False):
@@ -1582,7 +1689,7 @@ class Analyzer:
             'title': 'MVP profile data',
             'Conventions': 'CF-1.8',
             'institution': 'LMD/CNRS',
-            'source': 'MVPAnalyzer',
+            'source': 'PyMVP',
             'history': f"Created on {datetime.now().isoformat()}",
             'mvp_Yorig': int(self.Yorig)
         }

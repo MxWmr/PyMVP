@@ -13,7 +13,7 @@ This package is avalaible on PyPi
 (if you use conda environment, be sure to use a pip of your environment with ``` conda install pip``` and ```which pip```)
 
 
-For V0.1.0, it will be avalaible on conda
+For V0.1.0, it will be available on conda
 
 
 
@@ -65,6 +65,25 @@ Corrected data is presented as dictionaries: one dic per variables
 The keys are the id of the profiles and they point to a list of the profile (without nan)
 
 
+Interpolate CTD and MVP data on pressure of length n_pres (from min MVP pressure to max MVP pressure)
+```
+mvpa.interpolate_CTD_and_MVPcorrected(n_pres)
+```
+Interp data are now back into matrix as they are all the same length
+
+
+To set MVP data on nearby CTD data, we can delete the offset with the following function
+```
+mvpa.corrige_MVP_offset_on_ctd_simple(id_mvp,id_ctd,min_depth)
+```
+We advise to choose a min_depth that avoid to take into acount the surface layer which can introduce errors.
+
+For a far more precise detection of offset, if CTD and MVP cast are done at the same place and same time we can use the following function that also look for a pressure offset.
+
+```
+mvpa.corrige_MVP_offset_on_ctd_exact(id_mvp,id_ctd,min_depth)
+```
+
 ### Visualization
 
 There are multiple functions to visualize data:
@@ -99,10 +118,6 @@ The waterflow (the magnitude of the speed of the MVP in the water) can be comput
 mvpa.compute_waterflow(horizontal_speed=2,corr=False)
 ```
 
-Interpolate CTD and MVP data on pressure of length n_pres (from min MVP pressure to max MVP pressure)
-```
-mvpa.interpolate_CTD_and_MVPcorrected(n_pres)
-```
 
 Export MVP data to a NetCDF file using xarray.
 ```
