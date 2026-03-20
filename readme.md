@@ -30,7 +30,7 @@ import PyMVP as pmvp
 mvpa = pmvp.Analyzer()
 ``` 
 
-Then you can load the MVP data
+Then you can load the MVP data (in .raw which are ascii raw files of MVP or in .nc)
 
 ```
 path = "path/to/mvp/data"
@@ -38,7 +38,7 @@ mvpa.load_mvp_data(path,delp=[ , , , ])
 ```
 delp is the list of profiles you want to delete
 
-You can also load CTD data for comparison:
+You can also load CTD data (only in .nc as seabird package is no longuer up to date so .csv have to be converted into .nc) for comparison:
 
 ```
 mvpa.load_ctd_data(path_ctd)
@@ -89,12 +89,39 @@ mvpa.corrige_MVP_offset_on_ctd_exact(id_mvp,id_ctd,min_depth)
 There are multiple functions to visualize data:
 ```
 plot_vertical_speed(self,id)
-plot_profile_map(self) # Plot a geographical map with all the locations of cast
-plot_TSprofile(self, id_mvp)  # plot T and S profile for mvp data and also ctd if needed
-plot_BGCprofile(self, id_mvp) # plot Fluo and Oxy profile for mvp data and also ctd if needed
-plot_diagramTS(self,id_mvp) # plot T-S diagram for mvp data and also ctd if needed
-stat_compar(self,id_mvp=[...],id_ctd) # statistically compara MVP adn CTD profiles (T and S)
 ```
+
+Plot a geographical map with all the locations of cast
+```
+plot_profile_map(self)
+```
+
+plot T and S profile for mvp data and also ctd if needed
+```
+plot_TSprofile(self, id_mvp)
+```
+
+lot Fluo and Oxy profile for mvp data and also ctd if needed
+```
+plot_BGCprofile(self, id_mvp)
+```
+
+plot T-S diagram for mvp data and also ctd if needed
+```
+plot_diagramTS(self,id_mvp)
+```
+
+statistically compara MVP adn CTD profiles (T and S)
+```
+stat_compar(self,id_mvp=[...],id_ctd)
+```
+
+Plot a section of 2D MVP data (corrected and interpolated)
+choose var from: 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'
+```
+plot_MVP_transect(self,var,dpepth_max,depth_min,vmax,vmin,cmap)
+```
+
 
 ### Other functions
 

@@ -33,6 +33,10 @@ import cartopy.feature as cfeature
 import xarray as xr
 from . import mvp_routines as mvp
 from scipy.ndimage import median_filter
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter
+from geopy.distance import geodesic
+import pandas as pd
 
   
 class Analyzer:
@@ -50,6 +54,10 @@ class Analyzer:
         self.ctd = False
         self.speed = False
         self.corrected = False
+        self.GPS = False
+
+    def ___version___(self):
+        return "0.2.3"
 
 
     def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None):
@@ -625,7 +633,29 @@ class Analyzer:
         print('CTD data loaded successfully.')
         self.ctd = True
 
-            
+    def load_GPS(self, gps_path):
+        """
+        Load GPS data from a .csv file in the gps_path.
+        Fills the object attributes with GPS data and associated metadata.
+        Args:
+            gps_path (str): Path to the .csv file containing GPS data.
+        """
+        self.gps_path = gps_path
+        gps_data = pd.read_csv(gps_path)
+        self.GPS_TIME = gps_data['time'].values
+        self.GPS_LAT = gps_data['latitude'].values
+        self.GPS_LON = gps_data['longitude'].values
+        print('GPS data loaded successfully.')
+        self.gps = True
+
+        self.Lon_mvp = np.zeros(( self.PRES_mvp.shape[0], self.PRES_mvp.shape[1]))
+        self.Lat_mvp = np.zeros(( self.PRES_mvp.shape[0], self.PRES_mvp.shape[1]))
+
+        for i in range(self.PRES_mvp.shape[0]):
+            self.Lon_mvp[i,:] = np.interp(self.TIME_mvp[i,:], self.GPS_TIME, self.GPS_LON.astype(float))
+            self.Lat_mvp[i,:] = np.interp(self.TIME_mvp[i,:], self.GPS_TIME, self.GPS_LAT.astype(float))     
+
+        self.GPS = True     
 
     def compute_waterflow(self,horizontal_speed=2,corr=False):
         """
@@ -1411,7 +1441,7 @@ class Analyzer:
         self.FLUO_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.FLUO_ctd, pressure_grid)
         self.TURB_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TURB_ctd, pressure_grid)
         self.TEMP_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, TEMP_mvp_corr_mat, pressure_grid)
-        self.PRES_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, PRES_mvp_corr_mat, pressure_grid)
+        self.PRES_mvp_corr_interp = np.tile(pressure_grid, (PRES_mvp_corr_mat.shape[0], 1))
         self.COND_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, COND_mvp_corr_mat, pressure_grid)
         self.SALT_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SALT_mvp_corr_mat, pressure_grid)
         self.DO_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.DO_mvp, pressure_grid)
@@ -1419,6 +1449,9 @@ class Analyzer:
         self.TURB_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.TURB_mvp, pressure_grid)
         self.PH_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.PH_mvp, pressure_grid)
         self.SUNA_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.SUNA_mvp, pressure_grid)
+        if self.GPS:
+            self.Lat_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.Lat_mvp, pressure_grid)
+            self.Lon_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.Lon_mvp, pressure_grid)
 
         if self.speed:
             self.SPEED_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SPEED_mvp_corr_mat, pressure_grid)
@@ -1468,285 +1501,417 @@ class Analyzer:
     
 
 
-def corrige_MVP_offset_on_ctd_simple(self,id_mvp,id_ctd,min_depth):
-    """
-    This function corrects the offset between the MVP and CTD profiles by aligning the temperature, conductivity profiles. It calculates the mean difference in temperature between the two profiles and applies this correction to the CTD temperature data.
-    id_mvp and id_ctd must be the same length as each MVP profile will be be corrected with the corresponding CTD profile. The function returns the corrected MVP temperature and conductivity profiles.
-    This version of the correction is less restritive than the other one, does not need the CTD aand MVP profiles to be exactly similar
-    We advice to choose a min_depth that avoid to take into acount the surface layer which can introduce errors.
-    """
-
-    mean_temp_diff = []
-    mean_cond_diff = []
-    print("Calculating mean differences between MVP and CTD profiles before correction:")
-    for i in range(len(id_mvp)):
-        id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
-        # Calculate the mean difference in temperature between the MVP and CTD profiles
-        temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
-        mean_temp_diff.append(temp_diff)
-
-        cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
-        mean_cond_diff.append(cond_diff)
-    print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
-    print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
-
-    for i in range(len(id_mvp)):
-        id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
-
-        # Calculate the mean difference in temperature between the MVP and CTD profiles
-        temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
-        self.TEMP_mvp_corr_interp[id_mvp[i]] -= temp_diff
-
-        cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
-        self.COND_mvp_corr_interp[id_mvp[i]] -= cond_diff
-
-
-    mean_temp_diff = []
-    mean_cond_diff = []
-    print("After correction:")
-    for i in range(len(id_mvp)):
-        id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
-
-        # Calculate the mean difference in temperature between the MVP and CTD profiles
-        temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
-        mean_temp_diff.append(temp_diff)
-
-        cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
-        mean_cond_diff.append(cond_diff)
-    print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
-    print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
-   
-
-
-
-    def to_netcdf(self, filepath, corrected=False, compression=True, engine=None, per_profile_files=False):
+    def corrige_MVP_offset_on_ctd_simple(self,id_mvp,id_ctd,min_depth):
         """
-        Export MVP data to a NetCDF file using xarray.
-
-        Args:
-            filepath (str): Output NetCDF file path.
-            corrected (bool): Also write corrected arrays if present (*_mvp_corr). Default False.
-            compression (bool): Enable compression (engine dependent). Default True.
-            engine (str|None): One of 'netcdf4', 'h5netcdf', 'scipy'. If None, choose netcdf4.
-            per_profile_files (bool): If True, write one .nc per MVP cycle (two rows: down and up).
+        This function corrects the offset between the MVP and CTD profiles by aligning the temperature, conductivity profiles. It calculates the mean difference in temperature between the two profiles and applies this correction to the CTD temperature data.
+        id_mvp and id_ctd must be the same length as each MVP profile will be be corrected with the corresponding CTD profile. The function returns the corrected MVP temperature and conductivity profiles.
+        This version of the correction is less restritive than the other one, does not need the CTD aand MVP profiles to be exactly similar
+        We advice to choose a min_depth that avoid to take into acount the surface layer which can introduce errors.
         """
-        if not getattr(self, 'mvp', False):
-            raise RuntimeError("No MVP data loaded. Call load_mvp_data() first.")
 
-        engine = 'netcdf4' if engine is None else engine
-        if engine == 'scipy' and compression:
-            print('Warning: scipy backend does not support compression; writing without compression.')
-            compression = False
+        mean_temp_diff = []
+        mean_cond_diff = []
+        print("Calculating mean differences between MVP and CTD profiles before correction:")
+        for i in range(len(id_mvp)):
+            id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
+            # Calculate the mean difference in temperature between the MVP and CTD profiles
+            temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
+            mean_temp_diff.append(temp_diff)
 
-        # Dimensions
-        n_prof, n_samp = self.PRES_mvp.shape
+            cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
+            mean_cond_diff.append(cond_diff)
+        print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
+        print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
 
-        # Coordinates
-        profile_idx = np.arange(n_prof, dtype=np.int32)
-        sample_idx = np.arange(n_samp, dtype=np.int32)
+        for i in range(len(id_mvp)):
+            id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
 
-        # Direction per profile (down/up)
-        direction = None
-        if hasattr(self, 'DIR') and len(self.DIR) == n_prof:
-            direction = np.array(self.DIR, dtype=object)
-        else:
-            # Fallback based on even/odd
-            direction = np.array(['down' if i % 2 == 0 else 'up' for i in range(n_prof)], dtype=object)
+            # Calculate the mean difference in temperature between the MVP and CTD profiles
+            temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
+            self.TEMP_mvp_corr_interp[id_mvp[i]] -= temp_diff
 
-        # Per-sample time as seconds since reference origin
-        # TIME_mvp is in days relative to self.date_ref
-        time_seconds = None
-        if hasattr(self, 'TIME_mvp'):
-            time_seconds = self.TIME_mvp * 24.0 * 3600.0
-        else:
-            time_seconds = np.full((n_prof, n_samp), np.nan)
+            cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
+            self.COND_mvp_corr_interp[id_mvp[i]] -= cond_diff
 
-        # Per-profile datetime (one timestamp per cast pair); map using i//2
-        profile_time = None
-        if hasattr(self, 'DATETIME_mvp') and len(getattr(self, 'DATETIME_mvp', [])) > 0:
-            prof_times = []
-            for i in range(n_prof):
-                j = i // 2
-                if j < len(self.DATETIME_mvp) and self.DATETIME_mvp[j] is not None:
-                    prof_times.append(np.datetime64(self.DATETIME_mvp[j]))
-                else:
-                    prof_times.append(np.datetime64('NaT'))
-            profile_time = np.array(prof_times, dtype='datetime64[ns]')
-        else:
-            profile_time = np.array([np.datetime64('NaT')] * n_prof, dtype='datetime64[ns]')
 
-        # Build dataset variables safely
-        data_vars = {}
+        mean_temp_diff = []
+        mean_cond_diff = []
+        print("After correction:")
+        for i in range(len(id_mvp)):
+            id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
 
-        def add_var(var_name, arr, units=None, long_name=None):
-            if arr is None:
-                return
-            data_vars[var_name] = (
-                ('profile', 'sample'), arr,
-                {k: v for k, v in [('units', units), ('long_name', long_name)] if v is not None}
+            # Calculate the mean difference in temperature between the MVP and CTD profiles
+            temp_diff = np.nanmean(self.TEMP_mvp_corr_interp[id_mvp[i], id_valid] - self.TEMP_ctd_interp[id_ctd[i], id_valid])
+            mean_temp_diff.append(temp_diff)
+
+            cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
+            mean_cond_diff.append(cond_diff)
+        print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
+        print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+    
+
+
+
+        def to_netcdf(self, filepath, corrected=False, compression=True, engine=None, per_profile_files=False):
+            """
+            Export MVP data to a NetCDF file using xarray.
+
+            Args:
+                filepath (str): Output NetCDF file path.
+                corrected (bool): Also write corrected arrays if present (*_mvp_corr). Default False.
+                compression (bool): Enable compression (engine dependent). Default True.
+                engine (str|None): One of 'netcdf4', 'h5netcdf', 'scipy'. If None, choose netcdf4.
+                per_profile_files (bool): If True, write one .nc per MVP cycle (two rows: down and up).
+            """
+            if not getattr(self, 'mvp', False):
+                raise RuntimeError("No MVP data loaded. Call load_mvp_data() first.")
+
+            engine = 'netcdf4' if engine is None else engine
+            if engine == 'scipy' and compression:
+                print('Warning: scipy backend does not support compression; writing without compression.')
+                compression = False
+
+            # Dimensions
+            n_prof, n_samp = self.PRES_mvp.shape
+
+            # Coordinates
+            profile_idx = np.arange(n_prof, dtype=np.int32)
+            sample_idx = np.arange(n_samp, dtype=np.int32)
+
+            # Direction per profile (down/up)
+            direction = None
+            if hasattr(self, 'DIR') and len(self.DIR) == n_prof:
+                direction = np.array(self.DIR, dtype=object)
+            else:
+                # Fallback based on even/odd
+                direction = np.array(['down' if i % 2 == 0 else 'up' for i in range(n_prof)], dtype=object)
+
+            # Per-sample time as seconds since reference origin
+            # TIME_mvp is in days relative to self.date_ref
+            time_seconds = None
+            if hasattr(self, 'TIME_mvp'):
+                time_seconds = self.TIME_mvp * 24.0 * 3600.0
+            else:
+                time_seconds = np.full((n_prof, n_samp), np.nan)
+
+            # Per-profile datetime (one timestamp per cast pair); map using i//2
+            profile_time = None
+            if hasattr(self, 'DATETIME_mvp') and len(getattr(self, 'DATETIME_mvp', [])) > 0:
+                prof_times = []
+                for i in range(n_prof):
+                    j = i // 2
+                    if j < len(self.DATETIME_mvp) and self.DATETIME_mvp[j] is not None:
+                        prof_times.append(np.datetime64(self.DATETIME_mvp[j]))
+                    else:
+                        prof_times.append(np.datetime64('NaT'))
+                profile_time = np.array(prof_times, dtype='datetime64[ns]')
+            else:
+                profile_time = np.array([np.datetime64('NaT')] * n_prof, dtype='datetime64[ns]')
+
+            # Build dataset variables safely
+            data_vars = {}
+
+            def add_var(var_name, arr, units=None, long_name=None):
+                if arr is None:
+                    return
+                data_vars[var_name] = (
+                    ('profile', 'sample'), arr,
+                    {k: v for k, v in [('units', units), ('long_name', long_name)] if v is not None}
+                )
+            
+            add_var('PRES', getattr(self, 'PRES_mvp', None), units='dbar', long_name='Sea water pressure')
+            add_var('TEMP', getattr(self, 'TEMP_mvp', None), units='degC', long_name='In-situ temperature')
+            add_var('COND', getattr(self, 'COND_mvp', None), units='mS/cm', long_name='Conductivity')
+            add_var('SAL', getattr(self, 'SALT_mvp', None), units='psu', long_name='Practical salinity')
+            add_var('SOUNDVEL', getattr(self, 'SOUNDVEL_mvp', None), units='m s-1', long_name='Sound speed')
+            add_var('DO', getattr(self, 'DO_mvp', None), units='ml/L', long_name='Dissolved oxygen')
+            add_var('TEMP2', getattr(self, 'TEMP2_mvp', None), units='degC', long_name='Oxygen sensor temperature')
+            add_var('SUNA', getattr(self, 'SUNA_mvp', None), long_name='SUNA raw/derived')
+            add_var('FLUO', getattr(self, 'FLUO_mvp', None), units='ug/L', long_name='Chl fluorescence')
+            add_var('TURB', getattr(self, 'TURB_mvp', None), units='NTU', long_name='Turbidity')
+            add_var('PH', getattr(self, 'PH_mvp', None), units='1', long_name='pH')
+
+            # Position and time arrays (2D)
+            if hasattr(self, 'LAT_mvp'):
+                add_var('LATITUDE', self.LAT_mvp, units='degrees_north', long_name='Latitude at sample')
+            if hasattr(self, 'LON_mvp'):
+                add_var('LONGITUDE', self.LON_mvp, units='degrees_east', long_name='Longitude at sample')
+            # Time seconds since reference
+            data_vars['TIME'] = (
+                ('profile', 'sample'), time_seconds,
+                {
+                    'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
+                    'long_name': 'Time at sample'
+                }
             )
-        
-        add_var('PRES', getattr(self, 'PRES_mvp', None), units='dbar', long_name='Sea water pressure')
-        add_var('TEMP', getattr(self, 'TEMP_mvp', None), units='degC', long_name='In-situ temperature')
-        add_var('COND', getattr(self, 'COND_mvp', None), units='mS/cm', long_name='Conductivity')
-        add_var('SAL', getattr(self, 'SALT_mvp', None), units='psu', long_name='Practical salinity')
-        add_var('SOUNDVEL', getattr(self, 'SOUNDVEL_mvp', None), units='m s-1', long_name='Sound speed')
-        add_var('DO', getattr(self, 'DO_mvp', None), units='ml/L', long_name='Dissolved oxygen')
-        add_var('TEMP2', getattr(self, 'TEMP2_mvp', None), units='degC', long_name='Oxygen sensor temperature')
-        add_var('SUNA', getattr(self, 'SUNA_mvp', None), long_name='SUNA raw/derived')
-        add_var('FLUO', getattr(self, 'FLUO_mvp', None), units='ug/L', long_name='Chl fluorescence')
-        add_var('TURB', getattr(self, 'TURB_mvp', None), units='NTU', long_name='Turbidity')
-        add_var('PH', getattr(self, 'PH_mvp', None), units='1', long_name='pH')
 
-        # Position and time arrays (2D)
-        if hasattr(self, 'LAT_mvp'):
-            add_var('LATITUDE', self.LAT_mvp, units='degrees_north', long_name='Latitude at sample')
-        if hasattr(self, 'LON_mvp'):
-            add_var('LONGITUDE', self.LON_mvp, units='degrees_east', long_name='Longitude at sample')
-        # Time seconds since reference
-        data_vars['TIME'] = (
-            ('profile', 'sample'), time_seconds,
-            {
-                'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
-                'long_name': 'Time at sample'
+            # Include corrected arrays if requested and present
+            if corrected:
+                def add_corr(name, attr, units=None, long_name=None):
+                    if hasattr(self, attr):
+                        data_vars[name] = (
+                            ('profile', 'sample'), getattr(self, attr),
+                            {k: v for k, v in [('units', units), ('long_name', long_name)] if v is not None}
+                        )
+                add_corr('pressure_corrected', 'PRES_mvp_corr', units='dbar', long_name='Corrected pressure')
+                add_corr('temperature_corrected', 'TEMP_mvp_corr', units='degC', long_name='Corrected temperature')
+                add_corr('conductivity_corrected', 'COND_mvp_corr', units='mS/cm', long_name='Corrected conductivity')
+                add_corr('salinity_corrected', 'SALT_mvp_corr', units='psu', long_name='Corrected salinity')
+                if hasattr(self, 'TIME_mvp_corr'):
+                    data_vars['time_corrected'] = (
+                        ('profile', 'sample'), self.TIME_mvp_corr * 24.0 * 3600.0,
+                        {
+                            'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
+                            'long_name': 'Corrected time at sample'
+                        }
+                    )
+                if hasattr(self, 'LAT_mvp_corr'):
+                    add_corr('latitude_corrected', 'LAT_mvp_corr', units='degrees_north', long_name='Corrected latitude at sample')
+                if hasattr(self, 'LON_mvp_corr'):
+                    add_corr('longitude_corrected', 'LON_mvp_corr', units='degrees_east', long_name='Corrected longitude at sample')
+
+            # Coordinates and auxiliary per-profile variables
+            coords = {
+                'profile': ('profile', profile_idx),
+                'sample': ('sample', sample_idx)
             }
+
+            # Encode direction/time according to engine capabilities
+            if engine in ('netcdf4', 'h5netcdf'):
+                coords['direction'] = ('profile', direction.astype('U'), {'long_name': 'Profile direction'})
+                coords['profile_time'] = ('profile', profile_time, {'long_name': 'Profile nominal time'})
+            else:
+                # scipy backend: avoid object strings and datetime; use numeric fallbacks
+                dir_flag = np.where(direction.astype('U') == 'down', 0, 1).astype('int8')
+                coords['direction_flag'] = (
+                    'profile', dir_flag, {'long_name': 'Profile direction (0=down,1=up)'}
+                )
+                ref = np.datetime64(self.date_ref)
+                pt = profile_time.astype('datetime64[s]')
+                mask = (pt == np.datetime64('NaT'))
+                secs = (pt - ref).astype('timedelta64[s]').astype('float64')
+                secs[mask] = np.nan
+                coords['profile_time_sec'] = (
+                    'profile', secs,
+                    {'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
+                    'long_name': 'Profile nominal time'}
+                )
+
+            # Optional per-profile lat/lon (first valid sample)
+            def first_valid(vec):
+                # vec shape (n_prof, n_samp)
+                out = np.full((vec.shape[0],), np.nan)
+                for i in range(vec.shape[0]):
+                    row = vec[i]
+                    j = np.where(~np.isnan(row))[0]
+                    if j.size:
+                        out[i] = row[j[0]]
+                return out
+
+            if hasattr(self, 'LAT_mvp'):
+                coords['profile_lat'] = (
+                    'profile', first_valid(self.LAT_mvp), {'units': 'degrees_north', 'long_name': 'Profile latitude'}
+                )
+            if hasattr(self, 'LON_mvp'):
+                coords['profile_lon'] = (
+                    'profile', first_valid(self.LON_mvp), {'units': 'degrees_east', 'long_name': 'Profile longitude'}
+                )
+
+            # Global attributes
+            attrs = {
+                'title': 'MVP profile data',
+                'Conventions': 'CF-1.8',
+                'institution': 'LMD/CNRS',
+                'source': 'PyMVP',
+                'history': f"Created on {datetime.now().isoformat()}",
+                'mvp_Yorig': int(self.Yorig)
+            }
+
+            ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=attrs)
+
+            # Compression encoding per engine
+            encoding = None
+            if compression:
+                if engine == 'netcdf4':
+                    encoding = {name: {'zlib': True, 'complevel': 4} for name in data_vars.keys()}
+                elif engine == 'h5netcdf':
+                    encoding = {name: {'compression': 'gzip', 'compression_opts': 4} for name in data_vars.keys()}
+
+
+            if (not per_profile_files) and filepath.lower().endswith('.nc'):
+                out_path = filepath
+                ds.to_netcdf(out_path, encoding=encoding, engine=engine)
+                print(f"NetCDF written: {out_path} using engine={engine}")
+                return
+            base_dir = filepath
+
+            if not base_dir.endswith(os.sep):
+                base_dir = base_dir + os.sep
+
+            base_name = "MVP_" + os.path.basename(self.data_path).rstrip(os.sep)
+            if per_profile_files:
+                # Write one file per pair (down/up)
+                total_pairs = (n_prof + 1) // 2
+                for i in range(total_pairs):
+                    idxs = [k for k in (2*i, 2*i+1) if k < n_prof]
+                    if not idxs:
+                        continue
+                    ds_i = ds.isel(profile=idxs)
+
+                    #add i to filename
+                    fname = f"{base_name}_profile_{i:03d}.nc"
+                    out_path = os.path.join(base_dir, fname)
+                    ds_i.to_netcdf(out_path, encoding=encoding, engine=engine)
+                print(f"NetCDF written per profile into: {base_dir} using engine={engine}")
+            else:
+                file_name = f"{base_name}.nc"
+                out_path = os.path.join(base_dir, file_name)
+                ds.to_netcdf(out_path, encoding=encoding, engine=engine)
+                print(f"NetCDF written: {out_path} using engine={engine}")
+
+
+        def help(self):
+            """
+            Print all methods of the class with their docstring (header).
+            """
+            for attr in dir(self):
+                if callable(getattr(self, attr)) and not attr.startswith("__"):
+                    method = getattr(self, attr)
+                    doc = method.__doc__
+                    print(f"{attr}:\n{doc}\n{'-'*40}")      
+
+
+    def plot_MVP_transect(self,var='TEMP',l_id=None,depth_max=None,depth_min=None,vmax=None,vmin=None,cmap=None):
+        """
+        Plot a section of 2D inteprolated MVP data
+        Args:
+            var (str): Variable to plot. Choose from 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.
+            l_id (list of int): List of profile indices to include in the transect. If None, use all profiles.
+            depth_max (float): Maximum depth to display in the plot. If None, use max depth in data.
+            depth_min (float): Minimum depth to display in the plot. If None, use 0.
+            vmax (float): Maximum value for color scale. If None, use max value in data.
+            vmin (float): Minimum value for color scale. If None, use min value in data.
+            cmap: Matplotlib colormap to use. If None, use default colormap.
+
+        
+        """
+
+        if self.hasattr('PRES_mvp_corr_interp') == False:
+            raise ValueError("Corrected and interpolated MVP data not available. Apply corrections and interpolation first.")
+        
+        if l_id is None:
+            l_id = list(range(self.PRES_mvp_corr_interp.shape[0]))
+
+        match var:
+            case 'TEMP':
+                var = self.TEMP_mvp_corr_interp
+            case 'COND':
+                var = self.COND_mvp_corr_interp
+            case 'SAL':
+                var = self.SALT_mvp_corr_interp
+            case 'DO':
+                var = self.DO_mvp_corr_interp
+            case 'FLUO':
+                var = self.FLUO_mvp_corr_interp
+            case 'TURB':
+                var = self.TURB_mvp_corr_interp
+            case 'PH':
+                var = self.PH_mvp_corr_interp
+            case 'SUNA':
+                var = self.SUNA_mvp_corr_interp
+            case 'SPEED':
+                var = self.SPEED_mvp_corr_interp
+            case _: 
+                raise ValueError(f"Variable {var} not recognized. Choose from 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.")
+
+
+
+        P = self.PRES_mvp_corr_interp[l_id]
+        lat = self.Lat_mvp_corr_interp[l_id]
+        lon = self.Lon_mvp_corr_interp[l_id]
+        T = var[l_id]
+
+        if depth_max is None:
+            depth_max = np.nanmax(P)
+        if depth_min is None:
+            depth_min = 0
+
+
+        n_profiles, n_points = T.shape
+
+        # compute distance
+        dist_cum = 0
+        dist_all = np.zeros_like(T)
+
+        for i in range(n_profiles):
+            dist_i = np.zeros(n_points)
+            last_valid = None
+            for j in range(n_points):
+                if np.isnan(lat[i,j]) or np.isnan(lon[i,j]):
+                    dist_i[j] = np.nan
+                else:
+                    if last_valid is None:
+                        dist_i[j] = 0
+                    else:
+                        dist_i[j] = dist_i[last_valid] + geodesic(
+                            (lat[i,last_valid], lon[i,last_valid]),
+                            (lat[i,j], lon[i,j])
+                        ).km
+                    last_valid = j
+
+            dist_i += dist_cum
+            if np.any(~np.isnan(dist_i)):
+                dist_cum = np.nanmax(dist_i)
+            dist_all[i,:] = dist_i
+
+        # interpolation
+        dist_flat = dist_all.flatten()
+        T_flat = T.flatten()
+        P_flat = P.flatten()
+
+        # del nan
+        mask = ~np.isnan(dist_flat) & ~np.isnan(T_flat)
+        dist_flat = dist_flat[mask]
+        P_flat = P_flat[mask]
+        T_flat = T_flat[mask]
+
+        # create regular grid
+        dist_grid = np.linspace(dist_flat.min(), dist_flat.max(), 500)
+        P_grid = np.linspace(depth_min, depth_max, 1200)
+        DIST, PRES = np.meshgrid(dist_grid, P_grid)
+
+        # 2D interp
+        T_grid = griddata(
+            (dist_flat, P_flat),
+            T_flat,
+            (DIST, PRES),
+            method='linear'
         )
 
-        # Include corrected arrays if requested and present
-        if corrected:
-            def add_corr(name, attr, units=None, long_name=None):
-                if hasattr(self, attr):
-                    data_vars[name] = (
-                        ('profile', 'sample'), getattr(self, attr),
-                        {k: v for k, v in [('units', units), ('long_name', long_name)] if v is not None}
-                    )
-            add_corr('pressure_corrected', 'PRES_mvp_corr', units='dbar', long_name='Corrected pressure')
-            add_corr('temperature_corrected', 'TEMP_mvp_corr', units='degC', long_name='Corrected temperature')
-            add_corr('conductivity_corrected', 'COND_mvp_corr', units='mS/cm', long_name='Corrected conductivity')
-            add_corr('salinity_corrected', 'SALT_mvp_corr', units='psu', long_name='Corrected salinity')
-            if hasattr(self, 'TIME_mvp_corr'):
-                data_vars['time_corrected'] = (
-                    ('profile', 'sample'), self.TIME_mvp_corr * 24.0 * 3600.0,
-                    {
-                        'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
-                        'long_name': 'Corrected time at sample'
-                    }
-                )
-            if hasattr(self, 'LAT_mvp_corr'):
-                add_corr('latitude_corrected', 'LAT_mvp_corr', units='degrees_north', long_name='Corrected latitude at sample')
-            if hasattr(self, 'LON_mvp_corr'):
-                add_corr('longitude_corrected', 'LON_mvp_corr', units='degrees_east', long_name='Corrected longitude at sample')
-
-        # Coordinates and auxiliary per-profile variables
-        coords = {
-            'profile': ('profile', profile_idx),
-            'sample': ('sample', sample_idx)
-        }
-
-        # Encode direction/time according to engine capabilities
-        if engine in ('netcdf4', 'h5netcdf'):
-            coords['direction'] = ('profile', direction.astype('U'), {'long_name': 'Profile direction'})
-            coords['profile_time'] = ('profile', profile_time, {'long_name': 'Profile nominal time'})
-        else:
-            # scipy backend: avoid object strings and datetime; use numeric fallbacks
-            dir_flag = np.where(direction.astype('U') == 'down', 0, 1).astype('int8')
-            coords['direction_flag'] = (
-                'profile', dir_flag, {'long_name': 'Profile direction (0=down,1=up)'}
-            )
-            ref = np.datetime64(self.date_ref)
-            pt = profile_time.astype('datetime64[s]')
-            mask = (pt == np.datetime64('NaT'))
-            secs = (pt - ref).astype('timedelta64[s]').astype('float64')
-            secs[mask] = np.nan
-            coords['profile_time_sec'] = (
-                'profile', secs,
-                {'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
-                 'long_name': 'Profile nominal time'}
-            )
-
-        # Optional per-profile lat/lon (first valid sample)
-        def first_valid(vec):
-            # vec shape (n_prof, n_samp)
-            out = np.full((vec.shape[0],), np.nan)
-            for i in range(vec.shape[0]):
-                row = vec[i]
-                j = np.where(~np.isnan(row))[0]
-                if j.size:
-                    out[i] = row[j[0]]
-            return out
-
-        if hasattr(self, 'LAT_mvp'):
-            coords['profile_lat'] = (
-                'profile', first_valid(self.LAT_mvp), {'units': 'degrees_north', 'long_name': 'Profile latitude'}
-            )
-        if hasattr(self, 'LON_mvp'):
-            coords['profile_lon'] = (
-                'profile', first_valid(self.LON_mvp), {'units': 'degrees_east', 'long_name': 'Profile longitude'}
-            )
-
-        # Global attributes
-        attrs = {
-            'title': 'MVP profile data',
-            'Conventions': 'CF-1.8',
-            'institution': 'LMD/CNRS',
-            'source': 'PyMVP',
-            'history': f"Created on {datetime.now().isoformat()}",
-            'mvp_Yorig': int(self.Yorig)
-        }
-
-        ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=attrs)
-
-        # Compression encoding per engine
-        encoding = None
-        if compression:
-            if engine == 'netcdf4':
-                encoding = {name: {'zlib': True, 'complevel': 4} for name in data_vars.keys()}
-            elif engine == 'h5netcdf':
-                encoding = {name: {'compression': 'gzip', 'compression_opts': 4} for name in data_vars.keys()}
+        # -----------------------------
+        # 5. Lissage pour adoucir les frontières
+        # -----------------------------
+        T_grid_smooth = gaussian_filter(T_grid, sigma=2)
 
 
-        if (not per_profile_files) and filepath.lower().endswith('.nc'):
-            out_path = filepath
-            ds.to_netcdf(out_path, encoding=encoding, engine=engine)
-            print(f"NetCDF written: {out_path} using engine={engine}")
-            return
-        base_dir = filepath
-
-        if not base_dir.endswith(os.sep):
-            base_dir = base_dir + os.sep
-
-        base_name = "MVP_" + os.path.basename(self.data_path).rstrip(os.sep)
-        if per_profile_files:
-            # Write one file per pair (down/up)
-            total_pairs = (n_prof + 1) // 2
-            for i in range(total_pairs):
-                idxs = [k for k in (2*i, 2*i+1) if k < n_prof]
-                if not idxs:
-                    continue
-                ds_i = ds.isel(profile=idxs)
-
-                #add i to filename
-                fname = f"{base_name}_profile_{i:03d}.nc"
-                out_path = os.path.join(base_dir, fname)
-                ds_i.to_netcdf(out_path, encoding=encoding, engine=engine)
-            print(f"NetCDF written per profile into: {base_dir} using engine={engine}")
-        else:
-            file_name = f"{base_name}.nc"
-            out_path = os.path.join(base_dir, file_name)
-            ds.to_netcdf(out_path, encoding=encoding, engine=engine)
-            print(f"NetCDF written: {out_path} using engine={engine}")
-
-
-    def help(self):
-        """
-        Print all methods of the class with their docstring (header).
-        """
-        for attr in dir(self):
-            if callable(getattr(self, attr)) and not attr.startswith("__"):
-                method = getattr(self, attr)
-                doc = method.__doc__
-                print(f"{attr}:\n{doc}\n{'-'*40}")      
-
+        if vmax is None:
+            vmax = np.nanmax(T_grid_smooth)
+        if vmin is None:
+            vmin = np.nanmin(T_grid_smooth)
+        # -----------------------------
+        # 6. Plot
+        # -----------------------------
+        if cmap is None:
+            cmap = plt.get_cmap('viridis')
+        fig, ax = plt.subplots(figsize=(12,6))
+        pcm = ax.pcolormesh(DIST, PRES, T_grid_smooth, shading='auto', cmap=cmap, vmin=vmin, vmax=vmax)
+        ax.invert_yaxis()
+        ax.set_xlabel("Distance le long du transect [km]")
+        ax.set_ylabel("Profondeur [m]")
+        ax.set_title("Transect de température (interpolé)")
+        cbar = plt.colorbar(pcm, ax=ax)
+        cbar.set_label("Température [°C]")
+        plt.show()
 
 
 def split_ctd(pres, array):
