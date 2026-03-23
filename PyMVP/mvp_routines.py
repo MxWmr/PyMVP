@@ -1074,3 +1074,55 @@ def align_profiles(P, T_ref, T_to_align_raw, min_depth=0,max_shift=20):
     T_out[T_out_indices[mask_corrected]] = T_corrected[mask_corrected]
 
     return T_out, deltaP, deltaT
+
+
+
+
+def find_nearest_profile(time_mvp,Lat_mvp,Lon_mvp,time_ctd,Lat_ctd,Lon_ctd,mode):
+
+    if mode=='Dist':
+        idx = len(Lat_mvp)//2
+        Lat_mvp = np.radians(Lat_mvp[idx])
+        Lon_mvp = np.radians(Lon_mvp[idx])
+
+        R = 6371.0
+
+        min_dist = np.inf
+        nearest_index = -1
+
+        for i in range(len(Lat_ctd)):
+
+            lat,lon = np.radians(Lat_ctd[i]), np.radians(Lon_ctd[i]) 
+            mask = np.isfinite(lat) & np.isfinite(lon)
+            lat,lon = lat[mask], lon[mask]
+            lat,lon = lat[0],lon[0]
+
+            dlon = lon - Lon_mvp 
+            dlat = lat - Lat_mvp
+            a = np.sin(dlat / 2)**2 + np.cos(Lat_mvp) * np.cos(lat) * np.sin(dlon / 2)**2
+            c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+            dist = R * c * 1e3  # Convert to meters
+            if dist < min_dist:
+                min_dist = dist
+                nearest_index = i
+
+
+        return nearest_index, min_dist
+    
+    elif mode=='Time':
+        time_mvp = time_mvp[len(time_mvp)//2]  # Take the middle time of the MVP cycle as reference
+
+        min_time_diff = np.inf
+        nearest_index = -1
+        for i in range(len(time_ctd)):
+            time_diff = np.abs(time_ctd[i,-1] - time_mvp)
+            if time_diff < min_time_diff:
+                min_time_diff = time_diff
+                nearest_index = i
+        return nearest_index, min_time_diff
+    
+    else:
+        raise ValueError("Mode should be 'Dist' or 'Time'")
+
+
+

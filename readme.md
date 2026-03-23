@@ -135,9 +135,14 @@ More MVP data from another repo can be load:
 mvpa.load_mvp_data_again(path_to_another_mvp_repo,delp=[])
 ```
 
-Oxygen data from RINKO3 can be corrected via:
+An oxygen porfile of mvp can corrected with one ctd profile via:
 ```
-mvpa.correct_oxygen()
+mvpa.correct_oxygen(id_mvp,id_ctd,plotting=True)
+```
+
+All oxgen profiles can be corrected with nearest CTD profile of each one. mode='Temp' for temporal or 'Dist' for geographical distance to find the nearest profile
+```
+mvpa.correct_oxygen_all(self,mode)
 ```
 
 The waterflow (the magnitude of the speed of the MVP in the water) can be computed with:
