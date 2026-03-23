@@ -84,6 +84,11 @@ For a far more precise detection of offset, if CTD and MVP cast are done at the 
 mvpa.corrige_MVP_offset_on_ctd_exact(id_mvp,id_ctd,min_depth)
 ```
 
+All MVP profiles can be corrected via the nearest CTD (via time or geo reference with mode ='Time' or 'Dist')
+```
+mvpa.corrige_MVP_offset_on_ctd_all(min_depth,mode)
+```
+
 ### Visualization
 
 There are multiple functions to visualize data:
