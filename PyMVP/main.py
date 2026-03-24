@@ -117,7 +117,6 @@ class Analyzer:
                 self.Lat_mvp = nc['LATITUDE'].values
                 self.Lon_mvp = nc['LONGITUDE'].values
                 self.DATETIME_mvp = nc['profile_time'].values
-                self.DIR = nc['direction'].values
                 self.label_mvp = nc['profile'].values
                 self.freq_echant = nc.attrs['sampling frequency_hz']
 
@@ -344,7 +343,6 @@ class Analyzer:
                 self.Lat_mvp = nc['LATITUDE'].values
                 self.Lon_mvp = nc['LONGITUDE'].values
                 self.DATETIME_mvp = nc['profile_time'].values
-                self.DIR = nc['direction'].values
                 self.Label_mvp = nc['profile'].values
                 self.freq_echant = nc.attrs['sampling frequency_hz']
 
@@ -660,7 +658,7 @@ class Analyzer:
 
     def compute_waterflow(self,horizontal_speed=2,corr=False):
         """
-        Compute the water flow speed (u,v) from the horizontal speed and the direction of the profiles.
+        Compute the water flow speed (u,v) from the speed of the profiles.
         Args:
             horizontal_speed (float): Horizontal speed of the boat in m/s.
         """
@@ -1564,8 +1562,9 @@ class Analyzer:
         Export MVP data to a NetCDF file using xarray.
 
         Args:
-            filepath (str): Output NetCDF file path.
-            corrected (bool): Also write corrected arrays if present (*_mvp_corr). Default False.
+            filepath (str): Output NetCDF file path (or directory if per_profile_files=True).
+            corrected (bool): If False, write raw data. If True, write only corrected &
+                              interpolated data with corrected coordinates. Default False.
             compression (bool): Enable compression (engine dependent). Default True.
             engine (str|None): One of 'netcdf4', 'h5netcdf', 'scipy'. If None, choose netcdf4.
             per_profile_files (bool): If True, write one .nc per MVP cycle (two rows: down and up).
@@ -1578,31 +1577,15 @@ class Analyzer:
             print('Warning: scipy backend does not support compression; writing without compression.')
             compression = False
 
-        # Dimensions
-        n_prof, n_samp = self.PRES_mvp.shape
+        n_prof = self.PRES_mvp.shape[0]
 
-        # Coordinates
-        profile_idx = np.arange(n_prof, dtype=np.int32)
-        sample_idx = np.arange(n_samp, dtype=np.int32)
-
-        # Direction per profile (down/up)
-        direction = None
-        if hasattr(self, 'DIR') and len(self.DIR) == n_prof:
-            direction = np.array(self.DIR, dtype=object)
+        # Profile labels
+        if hasattr(self, 'label_mvp') and len(self.label_mvp) == n_prof:
+            profile_labels = np.array(self.label_mvp, dtype='U')
         else:
-            # Fallback based on even/odd
-            direction = np.array(['down' if i % 2 == 0 else 'up' for i in range(n_prof)], dtype=object)
+            profile_labels = np.array([f'profile_{i}' for i in range(n_prof)], dtype='U')
 
-        # Per-sample time as seconds since reference origin
-        # TIME_mvp is in days relative to self.date_ref
-        time_seconds = None
-        if hasattr(self, 'TIME_mvp'):
-            time_seconds = self.TIME_mvp * 24.0 * 3600.0
-        else:
-            time_seconds = np.full((n_prof, n_samp), np.nan)
-
-        # Per-profile datetime (one timestamp per cast pair); map using i//2
-        profile_time = None
+        # Per-profile datetime
         if hasattr(self, 'DATETIME_mvp') and len(getattr(self, 'DATETIME_mvp', [])) > 0:
             prof_times = []
             for i in range(n_prof):
@@ -1615,84 +1598,102 @@ class Analyzer:
         else:
             profile_time = np.array([np.datetime64('NaT')] * n_prof, dtype='datetime64[ns]')
 
-        # Build dataset variables safely
+        profile_idx = np.arange(n_prof, dtype=np.int32)
+
         data_vars = {}
 
-        def add_var(var_name, arr, units=None, long_name=None):
+        def _add(name, arr, dims, units=None, long_name=None):
             if arr is None:
                 return
-            data_vars[var_name] = (
-                ('profile', 'sample'), arr,
-                {k: v for k, v in [('units', units), ('long_name', long_name)] if v is not None}
-            )
-        
-        add_var('PRES', getattr(self, 'PRES_mvp', None), units='dbar', long_name='Sea water pressure')
-        add_var('TEMP', getattr(self, 'TEMP_mvp', None), units='degC', long_name='In-situ temperature')
-        add_var('COND', getattr(self, 'COND_mvp', None), units='mS/cm', long_name='Conductivity')
-        add_var('SAL', getattr(self, 'SALT_mvp', None), units='psu', long_name='Practical salinity')
-        add_var('SOUNDVEL', getattr(self, 'SOUNDVEL_mvp', None), units='m s-1', long_name='Sound speed')
-        add_var('DO', getattr(self, 'DO_mvp', None), units='ml/L', long_name='Dissolved oxygen')
-        add_var('TEMP2', getattr(self, 'TEMP2_mvp', None), units='degC', long_name='Oxygen sensor temperature')
-        add_var('SUNA', getattr(self, 'SUNA_mvp', None), long_name='SUNA raw/derived')
-        add_var('FLUO', getattr(self, 'FLUO_mvp', None), units='ug/L', long_name='Chl fluorescence')
-        add_var('TURB', getattr(self, 'TURB_mvp', None), units='NTU', long_name='Turbidity')
-        add_var('PH', getattr(self, 'PH_mvp', None), units='1', long_name='pH')
+            attrs = {}
+            if units is not None:
+                attrs['units'] = units
+            if long_name is not None:
+                attrs['long_name'] = long_name
+            data_vars[name] = (dims, arr, attrs)
 
-        # Position and time arrays (2D)
-        if hasattr(self, 'LAT_mvp'):
-            add_var('LATITUDE', self.Lat_mvp, units='degrees_north', long_name='Latitude at sample')
-        if hasattr(self, 'LON_mvp'):
-            add_var('LONGITUDE', self.Lon_mvp, units='degrees_east', long_name='Longitude at sample')
-        # Time seconds since reference
-        data_vars['TIME'] = (
-            ('profile', 'sample'), time_seconds,
-            {
-                'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
-                'long_name': 'Time at sample'
-            }
-        )
-
-        # Include corrected arrays if requested and present
+        # =====================================================================
+        # corrected=True  -> only corrected/interpolated data + corrected coords
+        # corrected=False -> raw data + raw coords
+        # =====================================================================
         if corrected:
-            def add_corr(name, attr, units=None, long_name=None):
-                if hasattr(self, attr):
-                    data_vars[name] = (
-                        ('profile', 'sample'), getattr(self, attr),
-                        {k: v for k, v in [('units', units), ('long_name', long_name)] if v is not None}
-                    )
-            add_corr('pressure_corrected', 'PRES_mvp_corr', units='dbar', long_name='Corrected pressure')
-            add_corr('temperature_corrected', 'TEMP_mvp_corr', units='degC', long_name='Corrected temperature')
-            add_corr('conductivity_corrected', 'COND_mvp_corr', units='mS/cm', long_name='Corrected conductivity')
-            add_corr('salinity_corrected', 'SALT_mvp_corr', units='psu', long_name='Corrected salinity')
-            if hasattr(self, 'TIME_mvp_corr'):
-                data_vars['time_corrected'] = (
-                    ('profile', 'sample'), self.TIME_mvp_corr * 24.0 * 3600.0,
-                    {
-                        'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
-                        'long_name': 'Corrected time at sample'
-                    }
+            if not hasattr(self, 'PRES_mvp_corr_interp'):
+                raise RuntimeError(
+                    "Corrected/interpolated data not available. "
+                    "Call interpolate_CTD_and_MVPcorrected() first."
                 )
-            if hasattr(self, 'LAT_mvp_corr'):
-                add_corr('latitude_corrected', 'LAT_mvp_corr', units='degrees_north', long_name='Corrected latitude at sample')
-            if hasattr(self, 'LON_mvp_corr'):
-                add_corr('longitude_corrected', 'LON_mvp_corr', units='degrees_east', long_name='Corrected longitude at sample')
 
-        # Coordinates and auxiliary per-profile variables
+            n_samp = self.PRES_mvp_corr_interp.shape[1]
+            sample_idx = np.arange(n_samp, dtype=np.int32)
+            dims = ('profile', 'sample')
+
+            # Data variables (corrected & interpolated only)
+            _add('TEMP',  self.TEMP_mvp_corr_interp,  dims, 'degC',  'Corrected & interpolated temperature')
+            _add('COND',  self.COND_mvp_corr_interp,  dims, 'mS/cm', 'Corrected & interpolated conductivity')
+            _add('SAL',   self.SALT_mvp_corr_interp,  dims, 'psu',   'Corrected & interpolated salinity')
+            _add('DO',    self.DO_mvp_corr_interp,    dims, 'ml/L',  'Corrected & interpolated dissolved oxygen')
+            _add('FLUO',  self.FLUO_mvp_corr_interp,  dims, 'ug/L',  'Corrected & interpolated fluorescence')
+            _add('TURB',  self.TURB_mvp_corr_interp,  dims, 'NTU',   'Corrected & interpolated turbidity')
+            _add('PH',    self.PH_mvp_corr_interp,    dims, '1',     'Corrected & interpolated pH')
+            _add('SUNA',  self.SUNA_mvp_corr_interp,  dims, None,    'Corrected & interpolated SUNA')
+            if hasattr(self, 'SPEED_mvp_corr_interp'):
+                _add('SPEED', self.SPEED_mvp_corr_interp, dims, 'm s-1', 'Corrected & interpolated profiling speed')
+
+            # Coordinates: corrected versions
+            _add('PRES', self.PRES_mvp_corr_interp, dims, 'dbar', 'Corrected & interpolated pressure')
+            if hasattr(self, 'Lat_mvp_corr_interp'):
+                _add('LATITUDE', self.Lat_mvp_corr_interp, dims, 'degrees_north', 'Corrected & interpolated latitude')
+            if hasattr(self, 'Lon_mvp_corr_interp'):
+                _add('LONGITUDE', self.Lon_mvp_corr_interp, dims, 'degrees_east', 'Corrected & interpolated longitude')
+            if hasattr(self, 'TIME_mvp_corr_interp'):
+                data_vars['TIME_s'] = (
+                    dims,
+                    self.TIME_mvp_corr_interp * 24.0 * 3600.0,
+                    {'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
+                     'long_name': 'Corrected & interpolated time'}
+                )
+
+        else:
+            # ---- Raw data ----
+            n_samp = self.PRES_mvp.shape[1]
+            sample_idx = np.arange(n_samp, dtype=np.int32)
+            dims = ('profile', 'sample')
+
+            _add('PRES',     self.PRES_mvp,     dims, 'dbar',           'Sea water pressure')
+            _add('TEMP',     self.TEMP_mvp,     dims, 'degC',           'In-situ temperature')
+            _add('COND',     self.COND_mvp,     dims, 'mS/cm',          'Conductivity')
+            _add('SAL',      self.SALT_mvp,     dims, 'psu',            'Practical salinity')
+            _add('SOUNDVEL', self.SOUNDVEL_mvp, dims, 'm s-1',          'Sound speed')
+            _add('DO',       self.DO_mvp,       dims, 'ml/L',           'Dissolved oxygen')
+            _add('TEMP2',    self.TEMP2_mvp,    dims, 'degC',           'Oxygen sensor temperature')
+            _add('SUNA',     self.SUNA_mvp,     dims, None,             'SUNA raw/derived')
+            _add('FLUO',     self.FLUO_mvp,     dims, 'ug/L',           'Chl fluorescence')
+            _add('TURB',     self.TURB_mvp,     dims, 'NTU',            'Turbidity')
+            _add('PH',       self.PH_mvp,       dims, '1',              'pH')
+            _add('LATITUDE', self.Lat_mvp,      dims, 'degrees_north',  'Latitude at sample')
+            _add('LONGITUDE',self.Lon_mvp,      dims, 'degrees_east',   'Longitude at sample')
+
+            if hasattr(self, 'TIME_mvp'):
+                time_seconds = self.TIME_mvp * 24.0 * 3600.0
+            else:
+                time_seconds = np.full((n_prof, n_samp), np.nan)
+            data_vars['TIME_s'] = (
+                dims, time_seconds,
+                {'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
+                 'long_name': 'Time at sample'}
+            )
+
+        # ---- Coordinates ----
         coords = {
             'profile': ('profile', profile_idx),
-            'sample': ('sample', sample_idx)
+            'sample': ('sample', sample_idx),
         }
 
-        # Encode direction/time according to engine capabilities
+        #  profile labels, profile time
         if engine in ('netcdf4', 'h5netcdf'):
-            coords['direction'] = ('profile', direction.astype('U'), {'long_name': 'Profile direction'})
             coords['profile_time'] = ('profile', profile_time, {'long_name': 'Profile nominal time'})
+            coords['profile_label'] = ('profile', profile_labels, {'long_name': 'Profile label / file name'})
         else:
-            # scipy backend: avoid object strings and datetime; use numeric fallbacks
-            dir_flag = np.where(direction.astype('U') == 'down', 0, 1).astype('int8')
-            coords['direction_flag'] = (
-                'profile', dir_flag, {'long_name': 'Profile direction (0=down,1=up)'}
-            )
             ref = np.datetime64(self.date_ref)
             pt = profile_time.astype('datetime64[s]')
             mask = (pt == np.datetime64('NaT'))
@@ -1701,71 +1702,70 @@ class Analyzer:
             coords['profile_time_sec'] = (
                 'profile', secs,
                 {'units': f'seconds since {self.date_ref.strftime("%Y-%m-%d %H:%M:%S")}',
-                'long_name': 'Profile nominal time'}
+                 'long_name': 'Profile nominal time'}
             )
 
-        # Optional per-profile lat/lon (first valid sample)
+        # Per-profile lat/lon (first valid sample from the appropriate source)
         def first_valid(vec):
-            # vec shape (n_prof, n_samp)
-            out = np.full((vec.shape[0],), np.nan)
+            out = np.full(vec.shape[0], np.nan)
             for i in range(vec.shape[0]):
-                row = vec[i]
-                j = np.where(~np.isnan(row))[0]
-                if j.size:
-                    out[i] = row[j[0]]
+                idx = np.where(~np.isnan(vec[i]))[0]
+                if idx.size:
+                    out[i] = vec[i, idx[0]]
             return out
 
-        if hasattr(self, 'LAT_mvp'):
-            coords['profile_lat'] = (
-                'profile', first_valid(self.Lat_mvp), {'units': 'degrees_north', 'long_name': 'Profile latitude'}
-            )
-        if hasattr(self, 'LON_mvp'):
-            coords['profile_lon'] = (
-                'profile', first_valid(self.Lon_mvp), {'units': 'degrees_east', 'long_name': 'Profile longitude'}
-            )
+        if corrected and hasattr(self, 'Lat_mvp_corr_interp'):
+            coords['profile_lat'] = ('profile', first_valid(self.Lat_mvp_corr_interp), {'units': 'degrees_north', 'long_name': 'Profile latitude'})
+        elif hasattr(self, 'Lat_mvp'):
+            coords['profile_lat'] = ('profile', first_valid(self.Lat_mvp), {'units': 'degrees_north', 'long_name': 'Profile latitude'})
 
-        # Global attributes
+        if corrected and hasattr(self, 'Lon_mvp_corr_interp'):
+            coords['profile_lon'] = ('profile', first_valid(self.Lon_mvp_corr_interp), {'units': 'degrees_east', 'long_name': 'Profile longitude'})
+        elif hasattr(self, 'Lon_mvp'):
+            coords['profile_lon'] = ('profile', first_valid(self.Lon_mvp), {'units': 'degrees_east', 'long_name': 'Profile longitude'})
+
+        # ---- Global attributes ----
         attrs = {
             'title': 'MVP profile data',
             'Conventions': 'CF-1.8',
             'institution': 'LMD/CNRS',
             'source': 'PyMVP',
             'history': f"Created on {datetime.now().isoformat()}",
-            'mvp_Yorig': int(self.Yorig)
+            'mvp_Yorig': int(self.Yorig),
+            'sampling frequency_hz': float(self.freq_echant) if hasattr(self, 'freq_echant') else -1.0,
+            'corrected': int(corrected),
         }
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs=attrs)
 
-        # Compression encoding per engine
+        # ---- Compression encoding ----
         encoding = None
         if compression:
             if engine == 'netcdf4':
-                encoding = {name: {'zlib': True, 'complevel': 4} for name in data_vars.keys()}
+                encoding = {name: {'zlib': True, 'complevel': 4} for name in data_vars}
             elif engine == 'h5netcdf':
-                encoding = {name: {'compression': 'gzip', 'compression_opts': 4} for name in data_vars.keys()}
+                encoding = {name: {'compression': 'gzip', 'compression_opts': 4} for name in data_vars}
 
-
+        # ---- Write ----
         if (not per_profile_files) and filepath.lower().endswith('.nc'):
-            out_path = filepath
-            ds.to_netcdf(out_path, encoding=encoding, engine=engine)
-            print(f"NetCDF written: {out_path} using engine={engine}")
+            ds.to_netcdf(filepath, encoding=encoding, engine=engine)
+            print(f"NetCDF written: {filepath} using engine={engine}")
             return
-        base_dir = filepath
 
+        base_dir = filepath
         if not base_dir.endswith(os.sep):
-            base_dir = base_dir + os.sep
+            base_dir += os.sep
+        os.makedirs(base_dir, exist_ok=True)
 
         base_name = "MVP_" + os.path.basename(self.data_path).rstrip(os.sep)
+
         if per_profile_files:
-            # Write one file per pair (down/up)
             total_pairs = (n_prof + 1) // 2
             for i in range(total_pairs):
-                idxs = [k for k in (2*i, 2*i+1) if k < n_prof]
+                idxs = [k for k in (2 * i, 2 * i + 1) if k < n_prof]
                 if not idxs:
                     continue
                 ds_i = ds.isel(profile=idxs)
-
-                #add i to filename
                 fname = f"{base_name}_profile_{i:03d}.nc"
                 out_path = os.path.join(base_dir, fname)
                 ds_i.to_netcdf(out_path, encoding=encoding, engine=engine)
