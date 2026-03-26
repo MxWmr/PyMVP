@@ -1,36 +1,3 @@
-
-################################################################################
-#
-# Collection of routines for MVP treatment
-#
-#
-# Function get_log: Read MPV log file to get starting and ending times of the cycle
-#
-#
-# Function read_mvp_cycle: Read one MVP cycle from a mvp_2022XXX.m1 file
-#
-#
-# Function time_mvp_cycle_up: 
-#	Allocate time to each sample for a MVP cycle
-#	Select the ascending MVP cycle (less noise)
-#
-# Function time_mvp_cycle_down: 
-#	Allocate time to each sample for a MVP cycle
-#	Select the descending MVP cycle
-#
-#
-# 
-#
-# 
-# 
-#
-#
-################################################################################
-
-#
-# Import libraries
-#
-
 import numpy as np 
 import scipy.stats as st 
 from datetime import date
@@ -42,26 +9,24 @@ from scipy.interpolate import interp1d
 from netCDF4 import Dataset
 from scipy.signal import butter, filtfilt, correlate, correlation_lags,savgol_filter
 
-#
-################################################################################
-#
-# Function get_log: Read MPV log file to get starting and ending times of the cycle, latitude, longitude, and datetime
-#
-#   input:
-#     mvp_log_name : ASCII MVP Log file (MVP_2022xxx.log)
-#     Yorig        : time is counted in days since Yorig/1/1 (here 1950/1/1)
-#
-#   output:
-#     mvp_tstart  : Start of the dive in days since Yorig/1/1
-#     mvp_tend    : End of the dive in days since Yorig/1/1
-#     cycle_dur   : Duration of the cycle in seconds
-#     lat         : Latitude (float, if available)
-#     lon         : Longitude (float, if available)
-#     dt_station  : Datetime object (datetime.datetime) of the station (if available)
-#
-################################################################################
 
 def get_log(mvp_log_name,Yorig):
+
+    """
+    Read MPV log file to get starting and ending times of the cycle, latitude, longitude, and datetime
+
+    Args:
+        mvp_log_name : ASCII MVP Log file (MVP_2022xxx.log)
+        Yorig        : time is counted in days since Yorig/1/1 (here 1950/1/1)
+
+    Return:
+        mvp_tstart  : Start of the dive in days since Yorig/1/1
+        mvp_tend    : End of the dive in days since Yorig/1/1
+        cycle_dur   : Duration of the cycle in seconds
+        lat         : Latitude (float, if available)
+        lon         : Longitude (float, if available)
+        dt_station  : Datetime object (datetime.datetime) of the station (if available)
+    """
 
     #print('Reading '+mvp_log_name)
 
@@ -168,31 +133,27 @@ def get_log(mvp_log_name,Yorig):
 
 
 
-#
-################################################################################
-#
-# Function read_mvp_cycle_raw: Read one MVP cycle from a mvp_2022XXX.raw file
-#
-#   input:
-#	mvp_dat_name : ASCII MVP .raw file (mvp_2022xxx.raw)
-#
-#
-#   output:
-#
-#	pres        : pressure [dbar] 
-#	soundvel    : Sound velocity [m/s]
-#	do          :  dissolved oxygen [umol/kg]
-#	temp2       : Temperature from DO sensor [oC]
-#	suna        :  SUNA data [umol/kg]
-#	fluo        : Fluorometer data [ug/l]
-#	turb        : Turbidity data [NTU]
-#	ph          : pH data [pH units]
-# 
-# 
-################################################################################
-#
-
 def read_mvp_cycle_raw(mvp_dat_name):
+
+    """
+    Read one MVP cycle from a mvp_2022XXX.raw file
+
+    Args:
+        mvp_dat_name : ASCII MVP .raw file (mvp_2022xxx.raw)
+
+
+    Return:
+
+        pres        : pressure [dbar] 
+        soundvel    : Sound velocity [m/s]
+        do          :  dissolved oxygen [umol/kg]
+        temp2       : Temperature from DO sensor [oC]
+        suna        :  SUNA data [umol/kg]
+        fluo        : Fluorometer data [ug/l]
+        turb        : Turbidity data [NTU]
+        ph          : pH data [pH units]
+
+    """
 
     #print('Reading '+mvp_dat_name)
 
@@ -272,32 +233,26 @@ def read_mvp_cycle_raw(mvp_dat_name):
 
 
 
-#
-################################################################################
-#
-# Function read_mvp_cycle_ncdf: Read one MVP cycle from a mvp_2022XXX.ncdf file
-#
-#   input:
-#	mvp_dat_name : NetCDF MVP .ncdf file (mvp_2022xxx.ncdf)
-#
-#
-#   output:
-#
-#	pres        : pressure [dbar] 
-#	soundvel    : Sound velocity [m/s]
-#	do          :  dissolved oxygen [umol/kg]
-#	temp2       : Temperature from DO sensor [oC]
-#	suna        :  SUNA data [umol/kg]
-#	fluo        : Fluorometer data [ug/l]
-#	turb        : Turbidity data [NTU]
-#	ph          : pH data [pH units]
-# 
-# 
-################################################################################
-#
 
 def read_mvp_cycle_ncdf(mvp_dat_name):
+    """
+    Read one MVP cycle from a mvp_2022XXX.ncdf file
 
+    Args:
+        mvp_dat_name : NetCDF MVP .ncdf file (mvp_2022xxx.ncdf)
+
+
+    Return:
+
+        pres        : pressure [dbar] 
+        soundvel    : Sound velocity [m/s]
+        do          :  dissolved oxygen [umol/kg]
+        temp2       : Temperature from DO sensor [oC]
+        suna        :  SUNA data [umol/kg]
+        fluo        : Fluorometer data [ug/l]
+        turb        : Turbidity data [NTU]
+        ph          : pH data [pH units]
+    """
 
     #print('Reading '+mvp_dat_name)
 
@@ -326,36 +281,20 @@ def read_mvp_cycle_ncdf(mvp_dat_name):
 
 
 
-
-
-
-# ################################################################################
-#
-# Function time_mvp_cycle_up_bgc:
-#     Allocate time to each sample for a MVP cycle (BGC version)
-#     Select the ascending MVP cycle (less noise)
-#
-#   input:
-#     pres      : pressure [dbar]
-#     soundvel  : sound velocity [m/s]
-#     do        : dissolved oxygen [umol/kg]
-#     temp2     : temperature from DO sensor [°C]
-#     suna      : SUNA data [umol/kg]
-#     fluo      : fluorometer data [ug/l]
-#     turb      : turbidity data [NTU]
-#     ph        : pH data [pH units]
-#     mvp_tstart: start of the dive in days since Yorig/1/1
-#     mvp_tend  : end of the dive in days since Yorig/1/1
-#
-#   output:
-#     pres_up, soundvel_up, do_up, temp2_up, suna_up, fluo_up, turb_up, ph_up
-#     (données ascendantes pour chaque variable)
-#	  time_cycle   : Time of each sample in days since Yorig/1/1 
-#
-# ################################################################################
-#
-
 def time_mvp_cycle_up(args,mvp_tstart,mvp_tend):
+    """
+    Allocate time to each sample for a MVP cycle
+    Select the ascending MVP cycle 
+
+    Args:
+        mvp_tstart: start of the dive in days since Yorig/1/1
+        mvp_tend  : end of the dive in days since Yorig/1/1
+
+    return:
+        args: ist of outputs
+        (données ascendantes pour chaque variable)
+        time_cycle   : Time of each sample in days since Yorig/1/1    
+    """
 
     # Allocate time to each data point
     N = np.size(args[0])
@@ -372,31 +311,22 @@ def time_mvp_cycle_up(args,mvp_tstart,mvp_tend):
     return args + [time_cycle_up]
 
 
-# ################################################################################
-#
-# Function time_mvp_cycle_down_bgc:
-#     Allocate time to each sample for a MVP cycle (BGC version)
-#     Select the descending MVP cycle
-#
-#   input:
-#     pres      : pressure [dbar]
-#     soundvel  : sound velocity [m/s]
-#     do        : dissolved oxygen [umol/kg]
-#     temp2     : temperature from DO sensor [°C]
-#     suna      : SUNA data [umol/kg]
-#     fluo      : fluorometer data [ug/l]
-#     turb      : turbidity data [NTU]
-#     ph        : pH data [pH units]
-#     mvp_tstart: start of the dive in days since Yorig/1/1
-#     mvp_tend  : end of the dive in days since Yorig/1/1
-#
-#   output:
-#     pres_down, soundvel_down, do_down, temp2_down, suna_down, fluo_down, turb_down, ph_down
-#     (données descendantes pour chaque variable)
-#     time_cycle_down: Time of each sample in days since Yorig/1/1
-#
-# ################################################################################
 def time_mvp_cycle_down(args, mvp_tstart, mvp_tend):
+    """
+    Allocate time to each sample for a MVP cycle
+    Select the descending MVP cycle
+
+    Args:
+        args: list of input to read
+        mvp_tstart: start of the dive in days since Yorig/1/1
+        mvp_tend  : end of the dive in days since Yorig/1/1
+
+    Return:
+        args: ist of outputs
+        (données descendantes pour chaque variable)
+        time_cycle_down: Time of each sample in days since Yorig/1/1
+
+    """
 
     N = np.size(args[0])
     time_cycle = np.linspace(mvp_tstart, mvp_tend, N)
@@ -413,24 +343,16 @@ def time_mvp_cycle_down(args, mvp_tstart, mvp_tend):
 
 
 
-# ################################################################################
-#
-# Function raw_data_conversion:
-#     Converts raw BGC sensor data (in V or mV) to physical units.
-#     Not very efficien because of np.vectorize, if too long, recode the conversion functions to work with numpy arrays directly.
-#
-#   input:
-#     pres, soundvel : already in physical units
-#     do_raw, temp2_raw, suna_raw, fluo_raw, turb_raw, ph_raw : raw sensor data to convert
-#
-#   output:
-#     pres, soundvel, do, temp2, suna, fluo, turb, ph : all variables in physical units (currently identical to input)
-#
-# ################################################################################
 def raw_data_conversion(pres, soundvel, cond, temp, do_raw, temp2_raw, suna_raw, fluo_raw, turb_raw, ph_raw):
     """
     Converts raw BGC sensor data (in V or mV) to physical units.
-    
+    Args:
+        pres, soundvel : already in physical units
+        do_raw, temp2_raw, suna_raw, fluo_raw, turb_raw, ph_raw : raw sensor data to convert
+
+    Return:
+        all inputs in physical units
+
     """
 
     temp2 = np.vectorize(TEMP2_conversion)(temp2_raw)  
@@ -543,84 +465,21 @@ def PH_conversion(ph_raw, temp):
     return pH
 
 
-#
-################################################################################
-#
-#
-#
-# Function remove surface waves : apply a butterworth filter to the profiles
-# to remove the surface waves, set here to 0.2 Hz
-# 
-#   input:
-#	data     : variable to filter
-#	TIME        : time is counted in days since Yorig/1/1 (here 1950/1/1)
-#
-#   output:
-#	data_final   : filtered data
-#       fluo_chla   : fluorometer intensity
-# 
-################################################################################
-#
-
-def remove_surface_waves(data,TIME,f_s,f_c,order):
-    data_final = np.zeros((data.shape[0],data.shape[1]))
-    data_final[:] = np.nan
-
-    for i_profile in range(data.shape[0]):
-        if np.isnan(np.nanmean(TIME[i_profile,:]))==0:
-            time_sampling=np.arange(np.nanmin(TIME[i_profile,:]),np.nanmax(TIME[i_profile,:]),1/f_s)
-            time_sampling = time_sampling[np.where(time_sampling<=np.nanmax(TIME[i_profile,:]))[0]]
-
-            ind = np.where((np.isnan(TIME[i_profile,:])==0) & (np.isnan(data[i_profile,:])==0))[0]
-            if len(ind)>6:
-                f1 = interpolate.interp1d(TIME[i_profile,ind], data[i_profile,ind],'linear',fill_value="extrapolate")
-                W_sampling = f1(time_sampling)
-
-                # Fourier transform
-                #f_s = 10*f_s 
-                #f_s = 25*10
-                #f_c = 1   # Cut-off frequency in Hz
-                #order = 10    # Order of the butterworth filter
-
-                omega_c = f_c       # Cut-off angular frequency
-                omega_c_d = omega_c / (f_s)    # Normalized cut-off frequency (digital)
-
-                # Design the digital Butterworth filter
-                b, a = butter(order, omega_c_d) 
-
-                W_lisse = signal.filtfilt(b, a, signal.detrend(W_sampling))
-
-                W_lisse = W_lisse + W_sampling - signal.detrend(W_sampling)
-                ind = np.where(TIME[i_profile,:]<=np.nanmax(time_sampling))[0]
-                f2 = interpolate.interp1d(time_sampling, W_lisse,'linear',fill_value="extrapolate")
-                data_final[i_profile,ind] = f2(TIME[i_profile,ind])
-                del ind, time_sampling, b, a, f1, f2, W_lisse, W_sampling, omega_c, omega_c_d
-
-    return data_final
-
-
-#
-################################################################################
-#
-#
-#
-# Correct thermistor viscous heating
-# 
-#   input:
-#	TEMP0     : In-situ Temperature
-#	SAL_PRA0  : Practical Salinity
-#	PRES0     : Pressure
-#	LON0      : Longitude
-#	LAT0      : Latitude
-#	TIME        : time is counted in days since Yorig/1/1 (here 1950/1/1)
-#
-#   output:
-#	TEMP1   : Corrected temperature
-# 
-################################################################################
-#
 
 def viscous_heating(TEMP0, SAL_PRA0, PRES0, LON0, LAT0, TIME):
+    """
+    Correct thermistor viscous heating
+    Args:
+        TEMP0     : In-situ Temperature
+        SAL_PRA0  : Practical Salinity
+        PRES0     : Pressure
+        LON0      : Longitude
+        LAT0      : Latitude
+        TIME      : time is counted in days since Yorig/1/1 (here 1950/1/1)
+
+    Returns:    
+        TEMP1   : Corrected temperature
+    """
     TEMP1 = np.zeros((TEMP0.shape[0], TEMP0.shape[1]))
     TEMP1[:] = np.nan
     for i in range(TEMP0.shape[0]):
@@ -701,25 +560,18 @@ def viscous_heating(TEMP0, SAL_PRA0, PRES0, LON0, LAT0, TIME):
         del dT, Pr, cp, mu, k, W
     return(TEMP1)
 
-#
-################################################################################
-#
-# Function vertical_interp: Interpolate each profile on a required variable
-#
-#   input:
-#	Depth_mat    : original variable acquisition
-#	Mat          : field to be interpolated
-#	Depth_interp : variable on which the field is interpolated (regularly sampled)
-#
-#   output:
-#
-#	Mat_Z_interp        : interpolated field
-# 
-# 
-################################################################################
-#
+
 
 def vertical_interp(Depth_mat,Mat,Depth_interp):
+    """
+    Interpolate each profile on a required variable (here depth).
+    Args:
+        Depth_mat (2D array): Original depth values for each profile (shape: n_profiles x n_depths)
+        Mat (2D array): Field to be interpolated (shape: n_profiles x n_depths)
+        Depth_interp (1D array): Variable on which the field is interpolated (regularly sampled depth levels)
+        Returns:
+        Mat_Z_interp (2D array): Interpolated field on the specified depth levels (shape: n_profiles x n_interp_depths)
+"""
 
     Mat_Z_interp = np.zeros((Mat.shape[0],len(Depth_interp)))
     Mat_Z_interp[:] = np.nan
@@ -743,64 +595,26 @@ def vertical_interp(Depth_mat,Mat,Depth_interp):
     return Mat_Z_interp
 
 
-#
-################################################################################
-#
-#
-#
-# Function mvp_bin(pres,salt,temp,time_cycle,Pbin,bin_method)
-#
-# Do a binning of MVP data on regulat pressure levels 
-# 
-#   input:
-#	pres         : pressure [dbar] 
-#	fluo         : fluo data [mg m-3] 
-#	salt         : Salinity [PSS-78]
-#	temp         : Temperature [oC] 
-#	time_cycle   : Time of each sample in days since Yorig/1/1 
-#	Pbin         : pressure bins [dbar] 
-#       bin_method   : binning method ('mean', 'median',...)
-#       add_fluo     : Flag to process fluorometer
-#
-#   output:
-#	pres         : pressure [dbar] 
-#	fluo         : fluo data [mg m-3] 
-#	salt         : Salinity [PSS-78]
-#	temp         : Temperature [oC] 
-#	time_cycle   : Time in days since Yorig/1/1 
-# 
-# 
-################################################################################
-#
 
-def median(Depth_mat,Mat,Depth_interp):
-    
-    Mat_Z_interp = np.zeros((Mat.shape[0],len(Depth_interp)))
-    Mat_Z_interp[:] = np.nan
-    
-    for i in range(Mat_Z_interp.shape[0]):
-        Depth_temp, ind = np.unique(Depth_mat[i,:],return_index=True)
-        Mat_temp = Mat[i,ind]
-        del ind
-        ind = np.argsort(Depth_temp, axis=0)
-        Mat_temp=np.take_along_axis(Mat_temp, ind, axis=0)
-        Depth_temp=np.take_along_axis(Depth_temp, ind, axis=0)
-        del ind
-        Mat_temp = Mat_temp[np.where(np.isnan(Depth_temp)==0)[0]]
-        Depth_temp = Depth_temp[np.where(np.isnan(Depth_temp)==0)[0]]
-        Depth_temp = Depth_temp[np.where(np.isnan(Mat_temp)==0)[0]]
-        Mat_temp = Mat_temp[np.where(np.isnan(Mat_temp)==0)[0]]
-        if (len(Mat_temp)>2) & (len(np.where(Depth_interp>=np.nanmin(Depth_temp))[0])>2) & (len(np.where(Depth_interp<=np.nanmax(Depth_temp))[0])>2):
-            ind = np.arange(np.where(Depth_interp>=np.nanmin(Depth_temp))[0][0], np.where(Depth_interp<=np.nanmax(Depth_temp))[0][-1])
-            if len(ind)>0:
-                vout = st.binned_statistic(Depth_temp,Mat_temp,statistic='median', bins=Depth_interp[ind])
-                Mat_Z_interp[i,ind[0:-1]] = vout.statistic
-                del ind, vout
-        del Depth_temp, Mat_temp
-    del i
-    return Mat_Z_interp
+
+
+
+
 
 def Calc_dist_time(TIME1, LON1, LAT1, TIME2, LON2, LAT2):
+    """
+    Calculate the distance and time difference between two sets of points given their latitudes, longitudes, and times.
+    Args:
+    TIME1 (array): Time of the first set of points (in days since Yorig/1/1)
+    LON1 (array): Longitudes of the first set of points 
+    LAT1 (array): Latitudes of the first set of points
+    TIME2 (array): Time of the second set of points (in days since Yorig/1/1)
+    LON2 (array): Longitudes of the second set of points
+    LAT2 (array): Latitudes of the second set of points
+    Returns:
+    Dist (2D array): Distance in meters between each pair of points from the two sets
+    Time (2D array): Absolute time difference in seconds between each pair of points from the
+    """
     Dist = np.zeros((len(TIME1), len(TIME2)))
     Time = np.zeros((len(TIME1), len(TIME2)))
     R = 6373.0
@@ -826,6 +640,17 @@ def Calc_dist_time(TIME1, LON1, LAT1, TIME2, LON2, LAT2):
 
 
 def filtering_tc(T,C,freq_echant,high_cutoff=1):
+    """
+    Filter temperature and conductivity data.
+    A low-pass Butterworth filter is applied to both temperature and conductivity profiles to remove high-frequency noise.
+    The cut-off frequency is set to 1 Hz, which is suitable for removing surface waves while preserving the main signal of interest in oceanographic profiles.
+    The filter is applied only to the valid (non-NaN) leading segment of the profiles to avoid introducing artifacts in the NaN regions. The filtered profiles are returned with NaN values preserved in the same locations as the original profiles.
+    Args:
+        T (array): Temperature profile
+        C (array): Conductivity profile
+        freq_echant (float): Sampling frequency in Hz
+        high_cutoff (float): Cut-off frequency for the low-pass filter in Hz (default is 1 Hz)
+    """
 
 
     sampling_frequency = freq_echant
@@ -850,6 +675,18 @@ def filtering_tc(T,C,freq_echant,high_cutoff=1):
 
 
 def temporal_lag(T,C,P,freq_echant):
+    """
+    Correction of the temporal lag between temperature and conductivity sensors by cross-correlation. 
+    The lag is estimated on the band-pass filtered signals to focus on the high frequencies, but without electronic noise. 
+    The lag is ofudn thanks to correlation between signal
+    It is then applied to the original temperature profile before calculating salinity.
+    The corrected salinity profile is then low-pass filtered to remove high-frequency noise introduced by the lag correction.
+    Args:
+        T (array): Temperature profile
+        C (array): Conductivity profile
+        P (array): Pressure profile
+        freq_echant (float): Sampling frequency in Hz
+    """
 
 
     # Band-pass filter to keep frequencies between 0.1 Hz and 9 Hz
@@ -920,6 +757,19 @@ def temporal_lag(T,C,P,freq_echant):
 
 
 def bin_average(P,T,C,time,dp=0.05):
+    """
+    Bin average data by pressure.
+
+    Args:
+        P (array): Pressure profile (dbar)
+        T (array): Temperature profile
+        C (array): Conductivity profile
+        time (array): Time profile
+        dp (float): Pressure bin size
+
+    Returns:
+        tuple: Binned pressure, temperature, conductivity, and time profiles
+    """
     if np.sum(np.isnan(P)) > 0:
         print('nan in pressure, cannot bin')
     if np.sum(np.isnan(T)) > 0:
@@ -955,6 +805,20 @@ def bin_average(P,T,C,time,dp=0.05):
 
 
 def bin_average_v2(P,T,C,S,time,dp=0.05):
+    """
+    Bin average data by pressure.
+
+    Args:
+        P (array): Pressure profile (dbar)
+        T (array): Temperature profile
+        C (array): Conductivity profile
+        S (array): Salinity profile
+        time (array): Time profile
+        dp (float): Pressure bin size
+
+    Returns:
+        tuple: Binned pressure, temperature, conductivity, salinity, and time profiles
+    """
     if np.sum(np.isnan(P)) > 0:
         print('nan in pressure, cannot bin')
     if np.sum(np.isnan(T)) > 0:
@@ -1006,6 +870,15 @@ def align_profiles(P, T_ref, T_to_align_raw, min_depth=0,max_shift=20):
     - recale
     - estime ΔT
     - corrige
+
+
+    Args:
+        P (array): Pressure profile (dbar)
+        T_ref (array): Reference temperature profile
+        T_to_align_raw (array): Temperature profile to align
+        min_depth (float): Minimum depth (in dbar) to consider for calculating mean differences
+        max_shift (float): Maximum shift (in dbar) to consider for alignment
+
     """
 
     ### 1. calcul delta de pression
@@ -1079,6 +952,19 @@ def align_profiles(P, T_ref, T_to_align_raw, min_depth=0,max_shift=20):
 
 
 def find_nearest_profile(time_mvp,Lat_mvp,Lon_mvp,time_ctd,Lat_ctd,Lon_ctd,mode):
+    """
+    Find the nearest CTD profile to each MVP profile based on time or spatial distance.
+    Args:
+        time_mvp (array): Time of the MVP profiles.
+        Lat_mvp (array): Latitude of the MVP profiles.
+        Lon_mvp (array): Longitude of the MVP profiles.
+        time_ctd (array): Time of the CTD profiles.
+        Lat_ctd (array): Latitude of the CTD profiles.
+        Lon_ctd (array): Longitude of the CTD profiles.
+        mode (str): Mode for finding nearest profile ('Dist' or 'Time').
+    Returns:
+        tuple: Index of the nearest CTD profile and the corresponding distance or time difference.
+    """
 
     if mode=='Dist':
         idx = len(Lat_mvp)//2

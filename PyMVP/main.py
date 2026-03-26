@@ -42,10 +42,8 @@ import pandas as pd
 class Analyzer:
     def __init__(self, Yorig=1950):
         """
-        Initialize the analyzer with the data path and reference year.
+        Initialize the analyzer with the reference year.
         Args:
-            data_path (str): Path to the folder containing MVP files.
-            subdirs (bool): Whether to search in subdirectories for MVP files (default False).
             Yorig (int): Reference year for dates (default 1950).
         """
         self.Yorig = Yorig
@@ -57,7 +55,7 @@ class Analyzer:
         self.GPS = False
 
     def ___version___(self):
-        return "0.2.3"
+        return "0.2.6"
 
 
     def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None):
@@ -65,8 +63,12 @@ class Analyzer:
         Load MVP data from .raw and .log files in the data_path folder.
         Fills the object attributes with data matrices and associated metadata.
         Args:
+            data_path (str): Path to the folder containing MVP files.
             delp (list): Indices of profiles to remove from the list (optional).
-            data_path (str): Path to the folder containing MVP files (optional).
+            subdirs (bool): Whether to search in subdirectories for MVP files (default False).
+            format (str): Format of the input files, either 'raw' for .raw and .log files or 'ncdf' for .nc files (default 'raw').
+            only_new (bool): Whether to load only new files (default False).
+            output_path (str): Path to the folder where corrected files will be saved (optional).
         """
         self.data_path = data_path
         self.subdirs = subdirs
@@ -759,6 +761,14 @@ class Analyzer:
 
 
     def plot_vertical_speed(self,id,mean=False,window=20):
+        """
+        plot profile of vertical speed
+        Args:
+            id (int): index of the profile to plot (if mean=False) or to include in the mean (if mean=True)
+            mean (bool): if True, plot the mean profile of all profiles (default: False)
+
+
+        """
             
         if self.mvp==False:
             print('No MVP data loaded.')
@@ -812,7 +822,6 @@ class Analyzer:
         Plot a map of the start locations of each profile (MVP and CTD),
         with a land/ocean background and coastlines using cartopy.
         The map is automatically zoomed to the profile area (no excessive margin).
-        Requires the cartopy module (pip install cartopy).
         """
 
         fig = plt.figure(figsize=(8, 8))
@@ -1325,7 +1334,11 @@ class Analyzer:
 
 
     def correct_oxygen_all(self,mode):
-
+        """
+        Apply oxygen correction to all MVP profiles using the nearest CTD profiles.
+        Args:
+            mode (str): Mode for finding nearest profile ('Dist' or 'Time').
+        """
 
         
         for id_mvp in range(0,self.PRES_mvp.shape[0]):
@@ -1337,6 +1350,12 @@ class Analyzer:
 
 
     def mvp_correction(self,high_cutoff=1,dp=0.1):
+        """
+        Apply corrections to MVP profiles: filtering, temporal lag correction, bin averaging, and median filtering.
+        Args:
+            high_cutoff (float): High cutoff frequency for filtering (Hz).
+            dp (float): Pressure bin size for bin averaging (dbar)
+        """
 
         T_MVP_corr = []
         P_MVP_corr = []
@@ -1366,7 +1385,7 @@ class Analyzer:
             T_corr,S_corr = mvp.temporal_lag(T,C,P,self.freq_echant)
 
             if dp != None:
-                P_ba,T_corr_ba,C_ba,S_corr_ba,Time_ba = mvp.bin_average_v2(P,T_corr,C,S_corr,Time,dp=0.1)
+                P_ba,T_corr_ba,C_ba,S_corr_ba,Time_ba = mvp.bin_average_v2(P,T_corr,C,S_corr,Time,dp=0.2)
 
                 S_corr_medfilt = median_filter(S_corr_ba, size=5)
 
@@ -1465,11 +1484,16 @@ class Analyzer:
         This function corrects the offset between the MVP and CTD profiles by aligning the temperature, conductivity profiles. It calculates the mean difference in temperature between the two profiles and applies this correction to the CTD temperature data.
         id_mvp and id_ctd must be the same length as each MVP profile will be be corrected with the corresponding CTD profile. The function returns the corrected MVP temperature and conductivity profiles.
         This version of the correction suppose that CTD and MVP should be exactly the same profile (same location, same time). If it not the case, you shouldf use the other function _imple
+        Args:
+            id_mvp (list): List of indices of MVP profiles to correct.
+            id_ctd (list): List of indices of CTD profiles to use for correction (must be the same length as id_mvp).
+            min_depth (float): Minimum depth (in dbar) to consider for calculating mean differences
+
         """
 
         mean_temp_diff = []
         mean_cond_diff = []
-
+        mean_salt_diff = []
         print("Calculating mean differences between MVP and CTD profiles before correction:")
         for i in range(len(id_mvp)):
             # Calculate the mean difference in temperature between the MVP and CTD profiles
@@ -1478,16 +1502,22 @@ class Analyzer:
 
             cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i]] - self.COND_ctd_interp[id_ctd[i]])
             mean_cond_diff.append(cond_diff)
+
+            salt_diff = np.nanmean(self.SALT_mvp_corr_interp[id_mvp[i]] - self.SALT_ctd_interp[id_ctd[i]])
+            mean_salt_diff.append(salt_diff)
+        
         print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
         print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+        print("Mean salinity difference between MVP and CTD profiles:", np.mean(mean_salt_diff))
 
         for i in range(len(id_mvp)):
             self.TEMP_mvp_corr_interp[id_mvp[i]] = mvp.align_profiles(self.PRES_mvp_corr_interp[id_mvp[i]], self.TEMP_ctd_interp[id_ctd[i]], self.TEMP_mvp_corr_interp[id_mvp[i]],min_depth)[0]
             self.COND_mvp_corr_interp[id_mvp[i]] = mvp.align_profiles(self.PRES_mvp_corr_interp[id_mvp[i]], self.COND_ctd_interp[id_ctd[i]], self.COND_mvp_corr_interp[id_mvp[i]],min_depth)[0]
-
+            self.SALT_mvp_corr_interp[id_mvp[i]] = mvp.align_profiles(self.PRES_mvp_corr_interp[id_mvp[i]], self.SALT_ctd_interp[id_ctd[i]], self.SALT_mvp_corr_interp[id_mvp[i]],min_depth)[0]
 
         mean_temp_diff = []
         mean_cond_diff = []
+        mean_salt_diff = []
         print("After correction:")
         for i in range(len(id_mvp)):
             # Calculate the mean difference in temperature between the MVP and CTD profiles
@@ -1496,8 +1526,12 @@ class Analyzer:
 
             cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i]] - self.COND_ctd_interp[id_ctd[i]])
             mean_cond_diff.append(cond_diff)
+
+            salt_diff = np.nanmean(self.SALT_mvp_corr_interp[id_mvp[i]] - self.SALT_ctd_interp[id_ctd[i]])
+            mean_salt_diff.append(salt_diff)
         print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
         print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+        print("Mean salinity difference between MVP and CTD profiles:", np.mean(mean_salt_diff))
     
 
     def corrige_MVP_offset_on_ctd_simple(self,id_mvp,id_ctd,min_depth):
@@ -1506,10 +1540,16 @@ class Analyzer:
         id_mvp and id_ctd must be the same length as each MVP profile will be be corrected with the corresponding CTD profile. The function returns the corrected MVP temperature and conductivity profiles.
         This version of the correction is less restritive than the other one, does not need the CTD aand MVP profiles to be exactly similar
         We advice to choose a min_depth that avoid to take into acount the surface layer which can introduce errors.
+        Args:
+            id_mvp (list): List of indices of MVP profiles to correct.
+            id_ctd (list): List of indices of CTD profiles to use for correction (must be the same length as id_mvp).
+            min_depth (float): Minimum depth (in dbar) to consider for calculating mean differences
+
         """
 
         mean_temp_diff = []
         mean_cond_diff = []
+        mean_salt_diff = []
         print("Calculating mean differences between MVP and CTD profiles before correction:")
         for i in range(len(id_mvp)):
             id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
@@ -1519,9 +1559,16 @@ class Analyzer:
 
             cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
             mean_cond_diff.append(cond_diff)
+
+            salt_diff = np.nanmean(self.SALT_mvp_corr_interp[id_mvp[i], id_valid] - self.SALT_ctd_interp[id_ctd[i], id_valid])
+            mean_salt_diff.append(salt_diff)
         print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
         print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
+        print("Mean salinity difference between MVP and CTD profiles:", np.mean(mean_salt_diff))
 
+        mean_temp_diff = []
+        mean_cond_diff = []
+        mean_salt_diff = []
         for i in range(len(id_mvp)):
             id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
 
@@ -1532,9 +1579,13 @@ class Analyzer:
             cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
             self.COND_mvp_corr_interp[id_mvp[i]] -= cond_diff
 
+            salt_diff = np.nanmean(self.SALT_mvp_corr_interp[id_mvp[i], id_valid] - self.SALT_ctd_interp[id_ctd[i], id_valid])
+            self.SALT_mvp_corr_interp[id_mvp[i]] -= salt_diff
 
         mean_temp_diff = []
         mean_cond_diff = []
+        mean_salt_diff = []
+
         print("After correction:")
         for i in range(len(id_mvp)):
             id_valid = self.PRES_mvp_corr_interp[id_mvp[i]] >= min_depth
@@ -1545,11 +1596,23 @@ class Analyzer:
 
             cond_diff = np.nanmean(self.COND_mvp_corr_interp[id_mvp[i], id_valid] - self.COND_ctd_interp[id_ctd[i], id_valid])
             mean_cond_diff.append(cond_diff)
+
+            salt_diff = np.nanmean(self.SALT_mvp_corr_interp[id_mvp[i], id_valid] - self.SALT_ctd_interp[id_ctd[i], id_valid])
+            mean_salt_diff.append(salt_diff)
+
         print("Mean temperature difference between MVP and CTD profiles:", np.mean(mean_temp_diff))
         print("Mean conductivity difference between MVP and CTD profiles:", np.mean(mean_cond_diff))
-    
+        print("Mean salinity difference between MVP and CTD profiles:", np.mean(mean_salt_diff))
 
     def corrige_MVP_offset_on_ctd_all(self,min_depth,mode):
+
+        """
+        Detect the offset between MVP adn CTD and corrige MVP profiles using the nearest CTD profiles.
+        Args:
+            min_depth (float): Minimum depth (in dbar) to consider for calculating mean differences
+            mode (str): Mode for finding nearest profile ('Dist' or 'Time').
+
+        """
 
         for id_mvp in range(self.PRES_mvp.shape[0]):
             id_nearest_ctd = mvp.find_nearest_profile(self.TIME_mvp_corr_interp[id_mvp],self.Lat_mvp_corr_interp[id_mvp], self.Lon_mvp_corr_interp[id_mvp],self.TIME_ctd ,self.LAT_ctd, self.LON_ctd,mode)[0]
