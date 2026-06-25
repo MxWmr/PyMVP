@@ -385,12 +385,12 @@ def DO_conversion(do_raw, temp, pres):
 
     """
 
-    A = -4.329108e1
-    B = 1.326965e2
-    C = -3.459148e-1
-    D = 1.011300e-2
-    E = 3.9e-3
-    F = 4.03e-5
+    A = -4.670955e1
+    B = 1.354704e2
+    C = -3.317170e-1
+    D = 1.003680e-2
+    E = 4.1e-3
+    F = 3.924e-5
     G = 0
     H = 1
 
@@ -457,8 +457,8 @@ def PH_conversion(ph_raw, temp):
     Converts raw pH data to physical units.
     """
 
-    pHslope = 4.6630
-    pHoffset = 2.5330
+    pHslope = 4.6331
+    pHoffset = 2.5392
     # Assuming ph_raw is in m
     pH = 7.0 + (ph_raw*1e-3 - pHoffset) / (pHslope * (temp+273.15) * 1.98416e-4)
 

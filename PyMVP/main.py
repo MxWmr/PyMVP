@@ -23,7 +23,7 @@
 from math import e
 import numpy as np 
 import glob
-from datetime import datetime
+from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import os
 import gsw
@@ -55,7 +55,7 @@ class Analyzer:
         self.GPS = False
 
     def ___version___(self):
-        return "0.2.6"
+        return "0.3.2"
 
 
     def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None):
@@ -165,7 +165,6 @@ class Analyzer:
                 # Read one cycle MVP data  
                 (pres,soundvel,cond,temp,do_raw,temp2_raw,suna_raw,fluo_raw,turb_raw,ph_raw) = mvp.read_mvp_cycle_raw(mvp_dat_name)
                 (pres,soundvel,cond,temp,do,temp2,suna,fluo,turb,ph) = mvp.raw_data_conversion(pres,soundvel,cond,temp,do_raw,temp2_raw,suna_raw,fluo_raw,turb_raw,ph_raw)
-            
 
                 freq_echant = float(len(pres)/cycle_dur)
 
@@ -305,6 +304,8 @@ class Analyzer:
 
         print('MVP data loaded successfully.')
         self.mvp = True
+
+        self.convert_DO_to_umolkg()
 
 
 
@@ -558,6 +559,7 @@ class Analyzer:
 
         print('MVP data loaded successfully.')
         self.mvp = True
+        self.convert_DO_to_umolkg()
 
 
     def load_ctd_data(self,data_path_ctd):
@@ -585,7 +587,7 @@ class Analyzer:
         TEMP_ctd_temp = []
         COND_ctd_temp = []
         TURB_ctd_temp = []
-        DO_ctd_temp = []
+        oxy_ctd_temp = []
         FLUO_ctd_temp = []
         CDOM_ctd_temp = []
         DATETIME_ctd = []
@@ -603,8 +605,8 @@ class Analyzer:
             SALT_ctd_temp.append(nc['SAL'].values[1])
             TURB_ctd_temp.append(nc['TURB'].values[0])
             TURB_ctd_temp.append(nc['TURB'].values[1])
-            DO_ctd_temp.append(nc['OXY'].values[0])
-            DO_ctd_temp.append(nc['OXY'].values[1])
+            oxy_ctd_temp.append(nc['OXY'].values[0])
+            oxy_ctd_temp.append(nc['OXY'].values[1])
             FLUO_ctd_temp.append(nc['FLUO'].values[0])
             FLUO_ctd_temp.append(nc['FLUO'].values[1])
             CDOM_ctd_temp.append(nc['CDOM'].values[0])
@@ -622,7 +624,7 @@ class Analyzer:
         self.COND_ctd = np.array(COND_ctd_temp)
         self.SALT_ctd = np.array(SALT_ctd_temp)
         self.TURB_ctd = np.array(TURB_ctd_temp)
-        self.DO_ctd = np.array(DO_ctd_temp)
+        self.oxy_ctd = np.array(oxy_ctd_temp)
         self.FLUO_ctd = np.array(FLUO_ctd_temp)
         self.CDOM_ctd = np.array(CDOM_ctd_temp)
         self.LAT_ctd = np.array(LAT_ctd_temp)
@@ -760,13 +762,11 @@ class Analyzer:
             self.DATETIME_ctd = np.array(self.DATETIME_ctd)[l_id2]
 
 
-    def plot_vertical_speed(self,id,mean=False,window=20):
+    def plot_vertical_speed(self,id=None,window=20):
         """
         plot profile of vertical speed
         Args:
-            id (int): index of the profile to plot (if mean=False) or to include in the mean (if mean=True)
-            mean (bool): if True, plot the mean profile of all profiles (default: False)
-
+            id (int): index of the profile to plot, if None, plot the mean profile
 
         """
             
@@ -774,7 +774,7 @@ class Analyzer:
             print('No MVP data loaded.')
             return
     
-        if mean:
+        if id==None:
             v_z_down = np.gradient(self.PRES_mvp[0::2], 1/self.freq_echant,axis=1)
             v_z_up = np.gradient(self.PRES_mvp[1::2], 1/self.freq_echant,axis=1)
 
@@ -784,11 +784,45 @@ class Analyzer:
                 v_z_up[i,:] = np.convolve(v_z_up[i,:], np.ones(2*window+1)/(2*window+1), mode='same')
             
             # take mean profile
-            v_z_down = np.nanmean(v_z_down,axis=0)
-            v_z_up = np.nanmean(v_z_up,axis=0)
+            p_grid = np.arange(0, 1001, 1)  # 0 à 1000 dbar, pas de 1
 
+            n_down = v_z_down.shape[0]
+            n_up   = v_z_up.shape[0]
+
+            vz_down_interp = np.full((n_down, len(p_grid)), np.nan)
+            vz_up_interp   = np.full((n_up,   len(p_grid)), np.nan)
+
+            for i in range(n_down):
+                pres = self.PRES_mvp[i*2, :]
+                vz   = v_z_down[i, :]   # vitesse du profil i (avant nanmean)
+                
+                mask = ~np.isnan(pres) & ~np.isnan(vz)
+                if mask.sum() > 1:
+                    vz_down_interp[i, :] = np.interp(p_grid, pres[mask], vz[mask],
+                                                    left=np.nan, right=np.nan)
+
+            for i in range(n_up):
+                pres = self.PRES_mvp[i*2+1, :]
+                vz   = v_z_up[i, :]
+                mask = ~np.isnan(pres) & ~np.isnan(vz)
+                if mask.sum() > 1:
+                    p_valid  = pres[mask]
+                    vz_valid = vz[mask]
+                    
+                    # Trier par pression croissante (crucial pour les profils up !)
+                    sort_idx = np.argsort(p_valid)
+                    p_valid  = p_valid[sort_idx]
+                    vz_valid = vz_valid[sort_idx]
+                    
+                    vz_up_interp[i, :] = np.interp(p_grid, p_valid, vz_valid,
+                                                    left=np.nan, right=np.nan)
+            v_z_down = np.nanmean(vz_down_interp, axis=0)
+            v_z_up   = np.nanmean(vz_up_interp,   axis=0)
+            pres_d = p_grid
+            pres_u = p_grid
             self.v_z_down = v_z_down
             self.v_z_up = v_z_up
+
 
 
         else:
@@ -799,14 +833,16 @@ class Analyzer:
             # smooth speed
             self.v_z_down = np.convolve(v_z_down, np.ones(2*window+1)/(2*window+1), mode='same')
             self.v_z_up = np.convolve(v_z_up, np.ones(2*window+1)/(2*window+1), mode='same')
+            pres_d = self.PRES_mvp[id]
+            pres_u = self.PRES_mvp[id+1]
 
 
 
 
         plt.figure()
 
-        plt.plot(v_z_down,self.PRES_mvp[id], label='down')
-        plt.plot(v_z_up,self.PRES_mvp[id+1], label='up')
+        plt.plot(v_z_down,pres_d, label='down')
+        plt.plot(v_z_up,pres_u, label='up')
 
         plt.gca().invert_yaxis()
         plt.legend()
@@ -838,8 +874,8 @@ class Analyzer:
         colors = plt.cm.tab10.colors
 
         # MVP
-        if hasattr(self, 'LAT_mvp') and hasattr(self, 'LON_mvp'):
-
+        if hasattr(self, 'Lat_mvp') and hasattr(self, 'Lon_mvp'):
+            l_lon,l_lat =[],[]
             put_label = True
             c = 0
             for i in range(0,self.Lat_mvp.shape[0],2):
@@ -852,6 +888,8 @@ class Analyzer:
 
                 lat = self.Lat_mvp[i,0] if self.Lat_mvp.ndim == 2 else  self.Lat_mvp[i]
                 lon = self.Lon_mvp[i,0] if self.Lon_mvp.ndim == 2 else  self.Lon_mvp[i]
+                l_lon.append(lon)
+                l_lat.append(lat)
                 ax.scatter(lon, lat, color=colors[c], marker='o', label='MVP '+self.label_mvp[i] if put_label else "", transform=ccrs.PlateCarree())
 
         # CTD
@@ -860,6 +898,9 @@ class Analyzer:
                 lat = self.LAT_ctd[i,0] if self.LAT_ctd.ndim == 2 else self.LAT_ctd[i]
                 lon = self.LON_ctd[i,0] if self.LON_ctd.ndim == 2 else self.LON_ctd[i]
                 ax.scatter(lon, lat, color='red', marker='^', label='CTD' if i==0 else "", transform=ccrs.PlateCarree())
+
+
+        ax.plot(l_lon, l_lat, color='grey', linestyle='-', transform=ccrs.PlateCarree())
 
         handles, labels = ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
@@ -915,7 +956,7 @@ class Analyzer:
         plt.xlabel('Salinity, psu')
         plt.ylabel('Pressure, dbar')
     
-    def plot_BGCprofile(self, id_mvp,id_ctd=None,):
+    def plot_BGCprofile(self, id_mvp,id_ctd=None,correction=False):
         """
         Plot raw biogeochemical profiles (O2, turbidity, fluorescence) for a given profile (MVP and CTD).
         Args:
@@ -930,15 +971,19 @@ class Analyzer:
 
         plt.figure()
         if self.mvp:
-            plt.plot(self.DO_mvp[id_mvp],self.PRES_mvp[id_mvp],label='MVP down')
-            plt.plot(self.DO_mvp[id_mvp+1],self.PRES_mvp[id_mvp+1],label='MVP up')
+            if self.corrected:
+                plt.plot(self.oxy[id_mvp], self.PRES_mvp_corr[id_mvp],label='MVP down corrected')
+                plt.plot(self.oxy[id_mvp+1], self.PRES_mvp_corr[id_mvp+1],label='MVP up corrected')
+            else:
+                plt.plot(self.oxy[id_mvp], self.PRES_mvp[id_mvp],label='MVP down')
+                plt.plot(self.oxy[id_mvp+1], self.PRES_mvp[id_mvp+1],label='MVP up')
         if self.ctd:
-            plt.plot(self.DO_ctd[id_ctd],self.PRES_ctd[id_ctd],label='CTD down')
-            plt.plot(self.DO_ctd[id_ctd+1],self.PRES_ctd[id_ctd+1],label='CTD up')
+            plt.plot(self.oxy_ctd[id_ctd],self.PRES_ctd[id_ctd],label='CTD down')
+            plt.plot(self.oxy_ctd[id_ctd+1],self.PRES_ctd[id_ctd+1],label='CTD up')
         plt.legend()    
         plt.gca().invert_yaxis()
         plt.grid()
-        plt.xlabel('Dissolved Oxygen, %')    
+        plt.xlabel(' Oxygen, umol/kg')    
         plt.ylabel('Pressure, dbar')
 
 
@@ -1064,7 +1109,7 @@ class Analyzer:
             Temp = self.TEMP_mvp
             Salt = self.SALT_mvp
             Cond = self.COND_mvp
-        Do = self.DO_mvp
+        oxy = self.oxy
 
         # Interpolate MVP and CTD data to match pressure levels
         pmin = np.nanmin(Pres)
@@ -1073,7 +1118,7 @@ class Analyzer:
 
         TEMP_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:],Temp[id_mvp,:], pressure_grid)
         SALT_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], Salt[id_mvp,:], pressure_grid)
-        DO_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], Do[id_mvp,:], pressure_grid)
+        oxy_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], oxy[id_mvp,:], pressure_grid)
         COND_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], Cond[id_mvp,:], pressure_grid) 
 
         # keep only down profiles
@@ -1081,7 +1126,7 @@ class Analyzer:
  
         TEMP_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.TEMP_ctd[id_ctd1,:], pressure_grid)
         SALT_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.SALT_ctd[id_ctd1,:], pressure_grid)
-        DO_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.DO_ctd[id_ctd1,:], pressure_grid)
+        oxy_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.oxy_ctd[id_ctd1,:], pressure_grid)
         COND_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.COND_ctd[id_ctd1,:], pressure_grid)
 
         # differences study between MVP down and CTD profiles
@@ -1091,8 +1136,8 @@ class Analyzer:
         diff_temp_up = TEMP_mvp_interp[1::2] - TEMP_ctd_interp
         diff_salt_down = SALT_mvp_interp[0::2] - SALT_ctd_interp
         diff_salt_up = SALT_mvp_interp[1::2] - SALT_ctd_interp
-        diff_do_down = DO_mvp_interp[0::2] - DO_ctd_interp
-        diff_do_up = DO_mvp_interp[1::2] - DO_ctd_interp
+        diff_oxy_down = oxy_mvp_interp[0::2] - oxy_ctd_interp
+        diff_oxy_up = oxy_mvp_interp[1::2] - oxy_ctd_interp
         diff_cond_down = COND_mvp_interp[0::2] - COND_ctd_interp
         diff_cond_up = COND_mvp_interp[1::2] - COND_ctd_interp
 
@@ -1105,8 +1150,8 @@ class Analyzer:
         mean_temp_up =  np.absolute(np.nanmean(diff_temp_up, axis=0))
         mean_salt_down =  np.absolute(np.nanmean(diff_salt_down, axis=0))
         mean_salt_up =  np.absolute(np.nanmean(diff_salt_up, axis=0))
-        mean_do_down =  np.absolute(np.nanmean(diff_do_down, axis=0))
-        mean_do_up =  np.absolute(np.nanmean(diff_do_up, axis=0))
+        mean_oxy_down =  np.absolute(np.nanmean(diff_oxy_down, axis=0))
+        mean_oxy_up =  np.absolute(np.nanmean(diff_oxy_up, axis=0))
         mean_cond_down =  np.absolute(np.nanmean(diff_cond_down, axis=0))
         mean_cond_up =  np.absolute(np.nanmean(diff_cond_up, axis=0))
 
@@ -1156,8 +1201,8 @@ class Analyzer:
 
         else:
 
-            axes[2].plot(mean_do_down, pressure_grid, label='Down')
-            axes[2].plot(mean_do_up, pressure_grid, label='Up')
+            axes[2].plot(mean_oxy_down, pressure_grid, label='Down')
+            axes[2].plot(mean_oxy_up, pressure_grid, label='Up')
             axes[2].invert_yaxis()
             axes[2].set_xlabel('Absolute Mean Error (%)')
             axes[2].set_ylabel('Pressure (dbar)')
@@ -1176,8 +1221,8 @@ class Analyzer:
         rmse_temp_up = np.mean(np.sqrt(np.nanmean(diff_temp_up**2, axis=1)))
         rmse_salt_down = np.mean(np.sqrt(np.nanmean(diff_salt_down**2, axis=1)))
         rmse_salt_up = np.mean(np.sqrt(np.nanmean(diff_salt_up**2, axis=1)))
-        rmse_do_down = np.mean(np.sqrt(np.nanmean(diff_do_down**2, axis=1)))
-        rmse_do_up = np.mean(np.sqrt(np.nanmean(diff_do_up**2, axis=1)))
+        rmse_oxy_down = np.mean(np.sqrt(np.nanmean(diff_oxy_down**2, axis=1)))
+        rmse_oxy_up = np.mean(np.sqrt(np.nanmean(diff_oxy_up**2, axis=1)))
         rmse_cond_down = np.mean(np.sqrt(np.nanmean(diff_cond_down**2, axis=1)))
         rmse_cond_up = np.mean(np.sqrt(np.nanmean(diff_cond_up**2, axis=1)))
 
@@ -1193,8 +1238,8 @@ class Analyzer:
         rmse_temp_up_deep   = np.mean(np.sqrt(np.nanmean(diff_temp_up[:,   i_200:]**2, axis=1)))
         rmse_salt_down_deep = np.mean(np.sqrt(np.nanmean(diff_salt_down[:, i_200:]**2, axis=1)))
         rmse_salt_up_deep   = np.mean(np.sqrt(np.nanmean(diff_salt_up[:,   i_200:]**2, axis=1)))
-        rmse_do_down_deep   = np.mean(np.sqrt(np.nanmean(diff_do_down[:,   i_200:]**2, axis=1)))
-        rmse_do_up_deep     = np.mean(np.sqrt(np.nanmean(diff_do_up[:,     i_200:]**2, axis=1)))
+        rmse_oxy_down_deep   = np.mean(np.sqrt(np.nanmean(diff_oxy_down[:,   i_200:]**2, axis=1)))
+        rmse_oxy_up_deep     = np.mean(np.sqrt(np.nanmean(diff_oxy_up[:,     i_200:]**2, axis=1)))
         rmse_cond_down_deep = np.mean(np.sqrt(np.nanmean(diff_cond_down[:, i_200:]**2, axis=1)))
         rmse_cond_up_deep   = np.mean(np.sqrt(np.nanmean(diff_cond_up[:,   i_200:]**2, axis=1)))    
 
@@ -1203,11 +1248,11 @@ class Analyzer:
 
         temp_rmse = [rmse_temp_down, rmse_temp_up]
         salt_rmse = [rmse_salt_down, rmse_salt_up]
-        do_rmse = [rmse_do_down, rmse_do_up]
+        oxy_rmse = [rmse_oxy_down, rmse_oxy_up]
 
         temp_rmse_deep = [rmse_temp_down_deep, rmse_temp_up_deep]
         salt_rmse_deep = [rmse_salt_down_deep, rmse_salt_up_deep]
-        do_rmse_deep = [rmse_do_down_deep, rmse_do_up_deep]
+        oxy_rmse_deep = [rmse_oxy_down_deep, rmse_oxy_up_deep]
 
         labels = ['MVP down', 'MVP up']
         colors = ['blue', 'orange']
@@ -1216,8 +1261,8 @@ class Analyzer:
 
         for idx, (ax, data, data_deep, title, ylabel) in enumerate(zip(
             axes,
-            [temp_rmse,  salt_rmse,  do_rmse],
-            [temp_rmse_deep, salt_rmse_deep, do_rmse_deep],
+            [temp_rmse,  salt_rmse,  oxy_rmse],
+            [temp_rmse_deep, salt_rmse_deep, oxy_rmse_deep],
             ['Temperature', 'Salinity', 'Oxygen'],
             ['RMSE (°C)', 'RMSE (psu)', 'RMSE (%)']
         )):
@@ -1348,6 +1393,42 @@ class Analyzer:
 
         print("Oxygen correction applied to all MVP profiles using nearest CTD profiles.")
 
+    def convert_DO_to_umolkg(self,correction=False):
+
+        if correction:  
+            oxy = {}
+        else:
+            oxy = np.empty_like(self.DO_mvp)
+
+
+        for id_mvp in range(0,self.PRES_mvp.shape[0]):
+            if correction:
+                sal = self.SALT_mvp_corr[id_mvp]
+                pres = self.PRES_mvp_corr[id_mvp]
+                Lon = self.Lon_mvp[id_mvp][:len(pres)]
+                Lat = self.Lat_mvp[id_mvp][:len(pres)]
+                temp = self.TEMP_mvp_corr[id_mvp]
+                # interpolate self.DO_mvp to self.PRES_mvp_corr
+                sort_idx = np.argsort(self.PRES_mvp[id_mvp])
+                pres_mvp_sorted = self.PRES_mvp[id_mvp][sort_idx]
+                do_mvp_sorted   = self.DO_mvp[id_mvp][sort_idx]
+
+                do = np.interp(pres, pres_mvp_sorted, do_mvp_sorted)
+            else:
+                sal = self.SALT_mvp[id_mvp]
+                pres = self.PRES_mvp[id_mvp]
+                Lon = self.Lon_mvp[id_mvp]
+                Lat = self.Lat_mvp[id_mvp]
+                temp = self.TEMP_mvp[id_mvp]
+                do = self.DO_mvp[id_mvp]
+
+            SA = gsw.SA_from_SP(sal, pres, Lon, Lat)
+            CT = gsw.CT_from_pt(SA, temp)
+            rho = gsw.rho(SA, CT, pres)  # Density in kg/m^3
+            oxy_sat = gsw.O2sol_SP_pt(sal, temp) * rho /1000
+            oxy[id_mvp] = do * oxy_sat / 100
+
+        self.oxy = oxy
 
     def mvp_correction(self,high_cutoff=1,dp=0.1):
         """
@@ -1408,8 +1489,11 @@ class Analyzer:
         self.COND_mvp_corr = {i: sublist for i, sublist in enumerate(C_MVP_corr)}
         self.SALT_mvp_corr = {i: sublist for i, sublist in enumerate(S_MVP_corr)}
         self.TIME_mvp_corr = {i: sublist for i, sublist in enumerate(Time_MVP_corr)}
+
+        
         self.corrected = True
 
+        self.convert_DO_to_umolkg(correction=True)
         print("MVP profiles corrected.")
 
 
@@ -1418,9 +1502,7 @@ class Analyzer:
         """
         Interpolate CTD data onto the corrected MVP pressure levels.
         """
-        if not self.ctd:
-            raise ValueError("CTD data not loaded.")
-    
+
         if not self.corrected:
             raise ValueError("MVP data not corrected. Apply corrections first.")
         
@@ -1442,6 +1524,9 @@ class Analyzer:
         max_lensalt = max([len(p) for p in self.SALT_mvp_corr.values()])
         SALT_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lensalt - len(row)) for row in self.SALT_mvp_corr.values()])
 
+        max_lenoxy = max([len(p) for p in self.oxy.values()])
+        oxy_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lenoxy - len(row)) for row in self.oxy.values()])
+
         if self.speed:
             max_lenvspd = max([len(p) for p in self.SPEED_mvp_corr.values()])
             SPEED_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lenvspd - len(row)) for row in self.SPEED_mvp_corr.values()])
@@ -1451,19 +1536,19 @@ class Analyzer:
 
 
         pressure_grid = np.linspace(np.nanmin(PRES_mvp_corr_mat), np.nanmax(PRES_mvp_corr_mat), length)
-
-        self.TEMP_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TEMP_ctd, pressure_grid)
-        self.PRES_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.PRES_ctd, pressure_grid)
-        self.COND_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.COND_ctd, pressure_grid)
-        self.SALT_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.SALT_ctd, pressure_grid)
-        self.DO_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.DO_ctd, pressure_grid)
-        self.FLUO_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.FLUO_ctd, pressure_grid)
-        self.TURB_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TURB_ctd, pressure_grid)
+        if self.ctd:
+            self.TEMP_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TEMP_ctd, pressure_grid)
+            self.PRES_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.PRES_ctd, pressure_grid)
+            self.COND_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.COND_ctd, pressure_grid)
+            self.SALT_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.SALT_ctd, pressure_grid)
+            self.oxy_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.oxy_ctd, pressure_grid)
+            self.FLUO_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.FLUO_ctd, pressure_grid)
+            self.TURB_ctd_interp = mvp.vertical_interp(self.PRES_ctd, self.TURB_ctd, pressure_grid)
         self.TEMP_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, TEMP_mvp_corr_mat, pressure_grid)
         self.PRES_mvp_corr_interp = np.tile(pressure_grid, (PRES_mvp_corr_mat.shape[0], 1))
         self.COND_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, COND_mvp_corr_mat, pressure_grid)
         self.SALT_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SALT_mvp_corr_mat, pressure_grid)
-        self.DO_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.DO_mvp, pressure_grid)
+        self.oxy_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, oxy_mvp_corr_mat, pressure_grid)
         self.FLUO_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.FLUO_mvp, pressure_grid)
         self.TURB_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.TURB_mvp, pressure_grid)
         self.PH_mvp_corr_interp = mvp.vertical_interp(self.PRES_mvp, self.PH_mvp, pressure_grid)
@@ -1840,6 +1925,199 @@ class Analyzer:
             print(f"NetCDF written: {out_path} using engine={engine}")
 
 
+    def to_csv(self, filepath, corrected=False, per_profile_files=False):
+        """
+        Export MVP data to CSV files.
+
+        Args:
+            filepath (str): Output CSV file path (or directory if per_profile_files=True).
+            corrected (bool): If False, write raw data. If True, write only corrected data. Default False.
+            per_profile_files (bool): If True, write one .csv per MVP profile; else write all in one file.
+        """
+        if not getattr(self, 'mvp', False):
+            raise RuntimeError("No MVP data loaded. Call load_mvp_data() first.")
+
+        n_prof = self.PRES_mvp.shape[0]
+
+        # Profile labels
+        if hasattr(self, 'label_mvp') and len(self.label_mvp) == n_prof:
+            profile_labels = np.array(self.label_mvp, dtype='U')
+        else:
+            profile_labels = np.array([f'profile_{i}' for i in range(n_prof)], dtype='U')
+
+        # Per-profile datetime
+        if hasattr(self, 'DATETIME_mvp') and len(getattr(self, 'DATETIME_mvp', [])) > 0:
+            prof_times = []
+            for i in range(n_prof):
+                j = i // 2
+                if j < len(self.DATETIME_mvp) and self.DATETIME_mvp[j] is not None:
+                    prof_times.append(self.DATETIME_mvp[j])
+                else:
+                    prof_times.append(None)
+        else:
+            prof_times = [None] * n_prof
+
+        # Prepare output directory
+        if per_profile_files:
+            base_dir = filepath
+            if not base_dir.endswith(os.sep):
+                base_dir += os.sep
+            os.makedirs(base_dir, exist_ok=True)
+            base_name = "MVP_" + os.path.basename(self.data_path).rstrip(os.sep)
+        else:
+            os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+
+        # =====================================================================
+        # Export all profiles or per-profile
+        # =====================================================================
+        
+        if corrected:
+            if not hasattr(self, 'PRES_mvp_corr'):
+                raise RuntimeError("Corrected data not available. Call mvp_correction() first.")
+
+            # Export corrected (non-interpolated) profiles
+            for prof_id in range(n_prof):
+                pres = self.PRES_mvp_corr[prof_id]
+                temp = self.TEMP_mvp_corr[prof_id]
+                salt = self.SALT_mvp_corr[prof_id]
+                cond = self.COND_mvp_corr[prof_id]
+                oxy = self.oxy[prof_id] if hasattr(self, 'oxy') and prof_id in self.oxy else np.full_like(pres, np.nan)
+                time = self.TIME_mvp_corr[prof_id]
+
+                # Calculate absolute datetimes
+                if prof_times[prof_id] is not None:
+                    if isinstance(prof_times[prof_id], str):
+                        prof_start_time = datetime.fromisoformat(prof_times[prof_id])
+                    else:
+                        prof_start_time = prof_times[prof_id]
+                else:
+                    prof_start_time = self.date_ref
+
+                datetimes = [prof_start_time + timedelta(seconds=float(t)) for t in time]
+
+                # Build DataFrame for this profile
+                df_data = {
+                    'PRES (dbar)': pres,
+                    'TEMP (°C)': temp,
+                    'SAL (psu)': salt,
+                    'COND (mS/cm)': cond,
+                    'OXY (µmol/kg)': oxy,
+                    'TIME': datetimes,
+                }
+
+                # Add optional fields if available
+                if hasattr(self, 'FLUO_mvp'):
+                    df_data['FLUO (ug/L)'] = np.interp(pres, self.PRES_mvp[prof_id], self.FLUO_mvp[prof_id], left=np.nan, right=np.nan)
+                if hasattr(self, 'TURB_mvp'):
+                    df_data['TURB (NTU)'] = np.interp(pres, self.PRES_mvp[prof_id], self.TURB_mvp[prof_id], left=np.nan, right=np.nan)
+                if hasattr(self, 'PH_mvp'):
+                    df_data['PH'] = np.interp(pres, self.PRES_mvp[prof_id], self.PH_mvp[prof_id], left=np.nan, right=np.nan)
+
+                if hasattr(self, 'Lat_mvp_corr_interp'):
+                    lat = self.Lat_mvp_corr_interp[prof_id][:len(pres)]
+                    lon = self.Lon_mvp_corr_interp[prof_id][:len(pres)]
+                else:
+                    lat = np.full_like(pres, self.Lat_mvp[prof_id, 0], dtype=float)
+                    lon = np.full_like(pres, self.Lon_mvp[prof_id, 0], dtype=float)
+
+                df_data['LAT (°N)'] = lat
+                df_data['LON (°E)'] = lon
+
+                df = pd.DataFrame(df_data)
+
+                if per_profile_files:
+                    fname = f"{base_name}_profile_{prof_id:03d}.csv"
+                    out_path = os.path.join(base_dir, fname)
+                    df.to_csv(out_path, index=False, na_rep='NaN')
+                else:
+                    df['profile_id'] = prof_id
+                    df['profile_label'] = profile_labels[prof_id]
+                    df['profile_time'] = prof_times[prof_id]
+                    
+                    if prof_id == 0:
+                        df_all = df
+                    else:
+                        df_all = pd.concat([df_all, df], ignore_index=True)
+
+            if not per_profile_files:
+                df_all.to_csv(filepath, index=False, na_rep='NaN')
+                print(f"CSV written (corrected, single file): {filepath}")
+            else:
+                print(f"CSV written (corrected, per-profile) into: {base_dir}")
+
+        else:
+            # Export raw profiles
+            for prof_id in range(n_prof):
+                pres = self.PRES_mvp[prof_id]
+                temp = self.TEMP_mvp[prof_id]
+                salt = self.SALT_mvp[prof_id]
+                cond = self.COND_mvp[prof_id]
+                do = self.DO_mvp[prof_id]
+                time = self.TIME_mvp[prof_id]
+
+                # Calculate absolute datetimes
+                if prof_times[prof_id] is not None:
+                    if isinstance(prof_times[prof_id], str):
+                        prof_start_time = datetime.fromisoformat(prof_times[prof_id])
+                    else:
+                        prof_start_time = prof_times[prof_id]
+                else:
+                    prof_start_time = self.date_ref
+
+                datetimes = [prof_start_time + timedelta(seconds=float(t)) for t in time]
+
+                # Build DataFrame for this profile
+                df_data = {
+                    'PRES (dbar)': pres,
+                    'TEMP (°C)': temp,
+                    'SAL (psu)': salt,
+                    'COND (mS/cm)': cond,
+                    'DO (ml/L)': do,
+                    'TIME': datetimes,
+                }
+
+                # Add optional fields
+                if hasattr(self, 'SOUNDVEL_mvp'):
+                    df_data['SOUNDVEL (m/s)'] = self.SOUNDVEL_mvp[prof_id]
+                if hasattr(self, 'TEMP2_mvp'):
+                    df_data['TEMP2 (°C)'] = self.TEMP2_mvp[prof_id]
+                if hasattr(self, 'FLUO_mvp'):
+                    df_data['FLUO (ug/L)'] = self.FLUO_mvp[prof_id]
+                if hasattr(self, 'TURB_mvp'):
+                    df_data['TURB (NTU)'] = self.TURB_mvp[prof_id]
+                if hasattr(self, 'PH_mvp'):
+                    df_data['PH'] = self.PH_mvp[prof_id]
+                if hasattr(self, 'SUNA_mvp'):
+                    df_data['SUNA'] = self.SUNA_mvp[prof_id]
+
+                df_data['LAT (°N)'] = self.Lat_mvp[prof_id]
+                df_data['LON (°E)'] = self.Lon_mvp[prof_id]
+
+                df = pd.DataFrame(df_data)
+
+                if per_profile_files:
+                    fname = f"{base_name}_profile_{prof_id:03d}.csv"
+                    out_path = os.path.join(base_dir, fname)
+                    df.to_csv(out_path, index=False, na_rep='NaN')
+                else:
+                    df['profile_id'] = prof_id
+                    df['profile_label'] = profile_labels[prof_id]
+                    df['profile_time'] = prof_times[prof_id]
+
+                    if prof_id == 0:
+                        df_all = df
+                    else:
+                        df_all = pd.concat([df_all, df], ignore_index=True)
+
+            if not per_profile_files:
+                df_all.to_csv(filepath, index=False, na_rep='NaN')
+                print(f"CSV written (raw, single file): {filepath}")
+            else:
+                print(f"CSV written (raw, per-profile) into: {base_dir}")
+
+            
+
+
     def help(self):
         """
         Print all methods of the class with their docstring (header).
@@ -1851,11 +2129,11 @@ class Analyzer:
                 print(f"{attr}:\n{doc}\n{'-'*40}")      
 
 
-    def plot_MVP_transect(self,var='TEMP',l_id=None,depth_max=None,depth_min=None,vmax=None,vmin=None,cmap=None):
+    def plot_MVP_transect(self,VAR='TEMP',l_id=None,depth_max=None,depth_min=None,vmax=None,vmin=None,cmap=None):
         """
         Plot a section of 2D inteprolated MVP data
         Args:
-            var (str): Variable to plot. Choose from 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.
+            VAR (str): Variable to plot. Choose from 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.
             l_id (list of int): List of profile indices to include in the transect. If None, use all profiles.
             depth_max (float): Maximum depth to display in the plot. If None, use max depth in data.
             depth_min (float): Minimum depth to display in the plot. If None, use 0.
@@ -1872,15 +2150,15 @@ class Analyzer:
         if l_id is None:
             l_id = list(range(self.PRES_mvp_corr_interp.shape[0]))
 
-        match var:
+        match VAR:
             case 'TEMP':
                 var = self.TEMP_mvp_corr_interp
             case 'COND':
                 var = self.COND_mvp_corr_interp
             case 'SAL':
                 var = self.SALT_mvp_corr_interp
-            case 'DO':
-                var = self.DO_mvp_corr_interp
+            case 'OX':
+                var = self.oxy_mvp_corr_interp
             case 'FLUO':
                 var = self.FLUO_mvp_corr_interp
             case 'TURB':
@@ -1892,13 +2170,51 @@ class Analyzer:
             case 'SPEED':
                 var = self.SPEED_mvp_corr_interp
             case _: 
-                raise ValueError(f"Variable {var} not recognized. Choose from 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.")
+                raise ValueError(f"Variable {var} not recognized. Choose from 'TEMP', 'COND', 'SAL', 'OX', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.")
 
 
 
         P = self.PRES_mvp_corr_interp[l_id]
-        lat = self.Lat_mvp_corr_interp[l_id]
-        lon = self.Lon_mvp_corr_interp[l_id]
+        if hasattr(self, 'Lat_mvp_corr_interp') and hasattr(self, 'Lon_mvp_corr_interp'):
+            lat = self.Lat_mvp_corr_interp[l_id]
+            lon = self.Lon_mvp_corr_interp[l_id]
+        else:
+            lat = self.Lat_mvp[l_id]
+            lon = self.Lon_mvp[l_id]
+            # Interpolate lat/lon between profiles to ensure spatial variation
+            lat_interp = np.zeros_like(lat)
+            lon_interp = np.zeros_like(lon)
+
+            for i in range(len(lat)):
+                # Starting position (first valid point of profile i)
+                lat_start = lat[i, 0]
+                lon_start = lon[i, 0]
+        
+                # Ending position
+                if i < len(lat) - 1:
+                    # Use starting position of next profile
+                    lat_end = lat[i+1, 0]
+                    lon_end = lon[i+1, 0]
+                else:
+                    # For last profile, extrapolate based on trend from previous profile
+                    if i > 0:
+                        lat_end = lat[i, 0] + (lat[i, 0] - lat[i-1, 0])
+                        lon_end = lon[i, 0] + (lon[i, 0] - lon[i-1, 0])
+                    else:
+                        # Only one profile, add small spatial variation
+                        lat_end = lat_start
+                        lon_end = lon_start
+        
+                # Interpolate lat/lon for all depth points in this profile
+                for j in range(len(lat[i])):
+                    frac = j / max(1, len(lat[i]) - 1)  # 0 to 1
+                    lat_interp[i, j] = lat_start + frac * (lat_end - lat_start)
+                    lon_interp[i, j] = lon_start + frac * (lon_end - lon_start)
+            lat = lat_interp
+            lon = lon_interp
+
+
+
         T = var[l_id]
 
         if depth_max is None:
@@ -1940,10 +2256,17 @@ class Analyzer:
         P_flat = P.flatten()
 
         # del nan
-        mask = ~np.isnan(dist_flat) & ~np.isnan(T_flat)
+        mask = ~np.isnan(dist_flat) & ~np.isnan(T_flat) & ~np.isnan(P_flat)
         dist_flat = dist_flat[mask]
         P_flat = P_flat[mask]
         T_flat = T_flat[mask]
+
+        # Check for degenerate case: all points have same x or y coordinate
+        if len(dist_flat) < 3 or np.std(dist_flat) == 0 or np.std(P_flat) == 0:
+            print(f"Warning: Insufficient data variation for interpolation.")
+            print(f"  Valid points: {len(dist_flat)}, dist std: {np.std(dist_flat):.6f}, P std: {np.std(P_flat):.6f}")
+            # Use nearest-neighbor or skip interpolation
+            raise ValueError("Cannot create transect: data has insufficient spatial variation for interpolation.")
 
         # create regular grid
         dist_grid = np.linspace(dist_flat.min(), dist_flat.max(), 500)
@@ -1963,7 +2286,6 @@ class Analyzer:
         # -----------------------------
         T_grid_smooth = gaussian_filter(T_grid, sigma=2)
 
-
         if vmax is None:
             vmax = np.nanmax(T_grid_smooth)
         if vmin is None:
@@ -1978,10 +2300,80 @@ class Analyzer:
         ax.invert_yaxis()
         ax.set_xlabel("Distance le long du transect [km]")
         ax.set_ylabel("Profondeur [m]")
-        ax.set_title(f"{var} transect (interpolated)")
+        ax.set_title(f"{VAR} transect (interpolated)")
         cbar = plt.colorbar(pcm, ax=ax)
-        cbar.set_label(f"{var} (units)")
+        cbar.set_label(f"{VAR} (units)")
         plt.show()
+
+
+
+    def plot_MVP_transect_simple(self,VAR='TEMP',delta=None,l_id=None,depth_max=None,depth_min=None,vmax=None,vmin=None,cmap=None):
+        """
+        Plot a section of 2D inteprolated MVP data
+        Args:
+            var (str): Variable to plot. Choose from 'TEMP', 'COND', 'SAL', 'DO', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.
+            l_id (list of int): List of profile indices to include in the transect. If None, use all profiles.
+            depth_max (float): Maximum depth to display in the plot. If None, use max depth in data.
+            depth_min (float): Minimum depth to display in the plot. If None, use 0.
+            vmax (float): Maximum value for color scale. If None, use max value in data.
+            vmin (float): Minimum value for color scale. If None, use min value in data.
+            cmap: Matplotlib colormap to use. If None, use default colormap.
+
+        
+        """
+
+        if hasattr(self, 'PRES_mvp_corr_interp') == False:
+            raise ValueError("Corrected and interpolated MVP data not available. Apply corrections and interpolation first.")
+        
+        if l_id is None:
+            l_id = list(range(self.PRES_mvp_corr_interp.shape[0]))
+
+        match VAR:
+            case 'TEMP':
+                var = self.TEMP_mvp_corr_interp
+                delta = 0.5 if delta is None else delta
+            case 'COND':
+                var = self.COND_mvp_corr_interp
+                delta = 0.5 if delta is None else delta
+            case 'SAL':
+                var = self.SALT_mvp_corr_interp
+                delta = 0.1 if delta is None else delta
+            case 'OX':
+                var = self.oxy_mvp_corr_interp
+                delta = 5 if delta is None else delta
+            case 'FLUO':
+                var = self.FLUO_mvp_corr_interp
+                delta = 0.5 if delta is None else delta
+            case 'TURB':
+                var = self.TURB_mvp_corr_interp
+                delta = 0.5 if delta is None else delta
+            case 'PH':
+                var = self.PH_mvp_corr_interp
+                delta = 0.1 if delta is None else delta
+            case 'SUNA':
+                var = self.SUNA_mvp_corr_interp
+                delta = 0.5 if delta is None else delta
+            case 'SPEED':
+                var = self.SPEED_mvp_corr_interp
+                delta = 0.1 if delta is None else delta
+            case _: 
+                raise ValueError(f"Variable {var} not recognized. Choose from 'TEMP', 'COND', 'SAL', 'OX', 'FLUO', 'TURB', 'PH', 'SUNA', 'SPEED'.")
+
+
+
+        P = self.PRES_mvp_corr_interp[l_id]
+        plt.close('all')
+        plt.figure()
+        for i in range(len(l_id)):
+            plt.plot(var[l_id[i]]+i*delta, P[l_id[i]])
+        plt.gca().invert_yaxis()
+        plt.xlabel(f"{VAR}")
+        plt.gca().set_xticks([])
+        plt.ylabel("Depth [m]")
+        plt.ylim(depth_max, depth_min)
+        plt.title(f"{VAR}")
+        plt.show()
+
 
 
 def split_ctd(pres, array):
