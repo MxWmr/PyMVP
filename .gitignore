@@ -3,3 +3,4 @@ examples/
 examples_perso/
 trait_essai.ipynb
 .gitignore
+mvp_corrected/
