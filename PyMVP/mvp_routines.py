@@ -1,14 +1,15 @@
 import numpy as np 
 import scipy.stats as st 
 from datetime import date
-from datetime import datetime
+from datetime import datetime, timedelta
 from scipy import interpolate
 from scipy import signal
 import gsw
 from scipy.interpolate import interp1d
 from netCDF4 import Dataset
 from scipy.signal import butter, filtfilt, correlate, correlation_lags,savgol_filter
-
+from typing import Optional
+import re
 
 def get_log(mvp_log_name,Yorig):
 
@@ -1012,3 +1013,201 @@ def find_nearest_profile(time_mvp,Lat_mvp,Lon_mvp,time_ctd,Lat_ctd,Lon_ctd,mode)
 
 
 
+def parse_SUNA(suna_file,m_line_frequency=20) :
+    """
+    Parse SUNA data from a given file.
+
+    Args:
+        suna_file (str): Path to the SUNA data file.
+        m_line_frequency (int): Frequency of 'M' lines in the SUNA data file.
+
+    Returns
+    -------
+          - lat          : float, decimal degrees (negative = South)
+          - lon          : float, decimal degrees (negative = West)
+          - header_datetime : datetime, from the file header
+        One list per variable, with per D line found element:
+          - m_timestamp  : list[datetime], estimated time of the preceding M line
+          - pressure     : list[float], first value of the preceding M line (dbar)
+          - dark         : list[float], 18th field after 'D' token
+          - NO3_raw      : list[float], 21st field after 'D' token
+          - spectre      : list[int],   second-to-last field of the D line (hex string)
+          - d_line_raw   : list[str],   full raw D line (for debugging)
+    """
+
+
+    with open(suna_file, "r", errors="replace") as fh:
+        raw = fh.read()
+ 
+    # ------------------------------------------------------------------ header
+    header, body = _split_header_body(raw)
+    lat, lon = _parse_latlon(header)
+    header_dt = _parse_header_datetime(header)
+ 
+    # ------------------------------------------------------------------ body lines
+    lines = body.splitlines()
+    lines = _rejoin_split_d_lines(lines)
+ 
+    l_m_timestamp = []
+    l_pressure = []
+    l_dark = []
+    l_NO3_raw = []
+    l_spectre = []
+    l_d_line_raw = []
+
+    m_line_index = -1          # counts M lines seen so far (0-based)
+    last_m_pressure: Optional[float] = None
+    last_m_index: int = -1     # index of the last M line seen
+ 
+    for n,line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+ 
+        first_token = stripped.split()[0]
+ 
+        # ---- M line --------------------------------------------------------
+        if first_token == "M":
+            m_line_index += 1
+            last_m_index = m_line_index
+            parts = stripped.split()
+            try:
+                last_m_pressure = float(parts[1])
+            except (IndexError, ValueError):
+                last_m_pressure = None
+ 
+        # ---- D line --------------------------------------------------------
+        elif first_token.startswith("D"):
+            # D lines look like:  D 0xHEX,A,date,field4,...,field_n-1(hex_spectre),field_n
+            # Split on comma after the leading "D 0xHEX" token
+            # Rebuild as comma-separated fields (the first token has no comma)
+            # e.g.  "D 0x7900,A,06/25/2026 00:04:38,0,-1.00,..."
+            # → fields[0]="D 0x7900", fields[1]="A", fields[2]="06/25/2026 00:04:38", ...
+ 
+            # Join token + rest after the space, then split on comma
+            # but the raw line already has the 'D 0x...' together with commas
+            fields = stripped.split(",")
+            # fields[0] = "D 0x7900"  (or similar)
+ 
+            try:
+                dark   = float(fields[18])   # 19th field  (0-indexed: 18)
+                NO3_raw = float(fields[21])  # 22nd field  (0-indexed: 21)
+                spectre = fields[-2].strip() # second-to-last
+                spectre_list = [int(spectre[i:i+4], 16) for i in range(0, len(spectre), 4)]
+            except (IndexError, ValueError) as exc:
+                # Malformed D line – skip but warn
+                print(f"Warning: could not parse D line ({exc}): {stripped[:80]}")
+                print(f"Raw line: {stripped} ")
+                print(lines[n-1])
+                print(line)
+                print(lines[n+1])
+                continue
+ 
+            # Compute M-line timestamp
+            m_timestamp: Optional[datetime] = None
+            if header_dt is not None and last_m_index >= 0:
+                dt_seconds = last_m_index / m_line_frequency
+                m_timestamp = header_dt + timedelta(seconds=dt_seconds)
+ 
+            l_m_timestamp.append(m_timestamp)
+            l_pressure.append(last_m_pressure)
+            l_dark.append(dark)
+            l_NO3_raw.append(NO3_raw)
+            l_spectre.append(spectre_list)
+            l_d_line_raw.append(stripped)
+ 
+    return np.array(l_m_timestamp), np.array(l_pressure,dtype=float), np.array(l_dark,dtype=float), np.array(l_NO3_raw,dtype=float), np.array(l_spectre), np.array(l_d_line_raw), lat, lon, header_dt
+ 
+ 
+def _rejoin_split_d_lines(lines: list[str]) -> list[str]:
+    """
+    Rejoint les lignes D qui ont été coupées en deux par un saut de ligne parasite.
+    Une ligne fragmentée ressemble à :
+        ligne n   : "D"  ou  "D "
+        ligne n+1 : "0x1234,A,..."   (commence par 0x)
+    """
+    result = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        # Détecte un fragment : ligne qui vaut exactement "D" seul
+        if stripped == "D" and i + 1 < len(lines):
+            next_stripped = lines[i + 1].strip()
+            if next_stripped.startswith("0x"):
+                # Fusionne les deux fragments
+                result.append("D " + next_stripped)
+                i += 2
+                continue
+        result.append(lines[i])
+        i += 1
+    return result
+
+
+ 
+def _split_header_body(raw: str) -> tuple[str, str]:
+    """Split file into header (up to <END_OF_HEADER>) and body."""
+    marker = "<END_OF_HEADER>"
+    idx = raw.find(marker)
+    if idx == -1:
+        return raw, ""
+    end = idx + len(marker)
+    return raw[:end], raw[end:]
+ 
+ 
+def _parse_latlon(header: str) -> tuple[Optional[float], Optional[float]]:
+    """Extract decimal lat/lon from header LAT/LON lines."""
+    lat = lon = None
+ 
+    # LAT ( ddmm.mmmmmmm,N):  3432.3192800,S
+    lat_match = re.search(
+        r"LAT\s*\(.*?\):\s*([\d.]+),([NS])", header, re.IGNORECASE
+    )
+    if lat_match:
+        raw_lat = float(lat_match.group(1))
+        hemi    = lat_match.group(2).upper()
+        deg = int(raw_lat / 100)
+        minutes = raw_lat - deg * 100
+        lat = deg + minutes / 60.0
+        if hemi == "S":
+            lat = -lat
+ 
+    # LON (dddmm.mmmmmmm,E): 01740.7099800,E
+    lon_match = re.search(
+        r"LON\s*\(.*?\):\s*([\d.]+),([EW])", header, re.IGNORECASE
+    )
+    if lon_match:
+        raw_lon = float(lon_match.group(1))
+        hemi    = lon_match.group(2).upper()
+        deg = int(raw_lon / 100)
+        minutes = raw_lon - deg * 100
+        lon = deg + minutes / 60.0
+        if hemi == "W":
+            lon = -lon
+ 
+    return lat, lon
+ 
+ 
+def _parse_header_datetime(header: str) -> Optional[datetime]:
+    """
+    Extract the start datetime from the header using the Time + Date fields.
+    Time (hh|mm|ss.s): 00:05:18.0
+    Date (dd/mm/yyyy): 25/06/2026
+    """
+    time_match = re.search(r"Time\s*\(.*?\):\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)", header)
+    date_match = re.search(r"Date\s*\(.*?\):\s*(\d{2})/(\d{2})/(\d{4})", header)
+ 
+    if not time_match or not date_match:
+        return None
+ 
+    hh, mm = int(time_match.group(1)), int(time_match.group(2))
+    ss_frac = float(time_match.group(3))
+    ss = int(ss_frac)
+    us = int(round((ss_frac - ss) * 1e6))
+ 
+    dd   = int(date_match.group(1))
+    mo   = int(date_match.group(2))
+    yyyy = int(date_match.group(3))
+ 
+    return datetime(yyyy, mo, dd, hh, mm, ss, us)
+ 
+ 

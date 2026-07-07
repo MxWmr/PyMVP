@@ -21,17 +21,20 @@
 
 
 from math import e
+from attr import has
 import numpy as np 
 import glob
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 import os
+import matplotlib.dates as mdates
 import gsw
 from tqdm import tqdm
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import xarray as xr
 from . import mvp_routines as mvp
+from . import NO3_process as no3_p
 from scipy.ndimage import median_filter
 from scipy.interpolate import griddata
 from scipy.ndimage import gaussian_filter
@@ -53,6 +56,8 @@ class Analyzer:
         self.speed = False
         self.corrected = False
         self.GPS = False
+        self.SUNA = False
+        self.dist = False
 
     def ___version___(self):
         return "0.3.2"
@@ -147,6 +152,7 @@ class Analyzer:
         Label_mvp = []
 
         delp.sort(reverse=True)
+        self.delp =delp
         for i in delp:
             del files[i]
 
@@ -157,8 +163,11 @@ class Analyzer:
             # Get start and end time of the cycle
 
             if format=='raw':
-                (mvp_tstart,mvp_tend,cycle_dur, lat, lon, dt_station) = mvp.get_log(mvp_log_name,self.Yorig)
-
+                try:
+                    (mvp_tstart,mvp_tend,cycle_dur, lat, lon, dt_station) = mvp.get_log(mvp_log_name,self.Yorig)
+                except:
+                    delp.append(files.index(mvp_dat_name))
+                    continue
 
             if cycle_dur>1:
 
@@ -177,6 +186,7 @@ class Analyzer:
                     (pres_down,soundvel_down,cond_down,temp_down,do_down,temp2_down,suna_down,fluo_down,turb_down,ph_down,time_down) = mvp.time_mvp_cycle_down([pres,soundvel,cond,temp,do,temp2,suna,fluo,turb,ph],mvp_tstart,mvp_tend)
 
                     if len(pres_down)>0:
+                        print(mvp_dat_name.split('/')[-1],' length of down profile:', len(pres_down))
                         if np.nanmax(pres_down)-np.nanmin(pres_down)>2:
                             PRES_temp.append(pres_down)
                             SOUNDVEL_temp.append(soundvel_down)
@@ -194,13 +204,14 @@ class Analyzer:
                             LON_temp.append(lon)
 
                             DIR.append('down')
-                            Label_mvp.append(mvp_dat_name.replace('\\','/').split('/')[-2])
+                            Label_mvp.append(mvp_dat_name.split('/')[-1])
 
                     else:
                         print('ohohoh no down profile found for file: ' + mvp_dat_name)
 
                             
                     if len(pres_up)>0:
+                        print(mvp_dat_name.split('/')[-1],' length of up profile:',len(pres_up))
                         if np.nanmax(pres_up)-np.nanmin(pres_up)>2:
                             PRES_temp.append(pres_up)
                             SOUNDVEL_temp.append(soundvel_up)
@@ -217,8 +228,7 @@ class Analyzer:
                             LAT_temp.append(lat)
                             LON_temp.append(lon)
                             DIR.append('up')
-                            Label_mvp.append(mvp_dat_name.replace('\\','/').split('/')[-2])
-
+                            Label_mvp.append(mvp_dat_name.split('/')[-1])
                     else:
                         print('ohohoh no up profile found for file: ' + mvp_dat_name)
 
@@ -636,7 +646,67 @@ class Analyzer:
         print('CTD data loaded successfully.')
         self.ctd = True
 
-    def load_GPS(self, gps_path):
+
+    def load_gps_from_ncdf(self, gps_path): 
+        day0 = self.DATETIME_mvp[0].strftime('%Y%m%d') 
+        day1 = self.DATETIME_mvp[-1].strftime('%Y%m%d') 
+        file = glob.glob(gps_path +day0 + '*.nav') 
+        ds0 = xr.open_dataset(file[0]) 
+
+        gpstime = ds0['time'].values 
+        lat_gps = ds0['lat'].values 
+        lon_gps = ds0['long'].values 
+
+        if day0 != day1: 
+
+            for day in range(int(day0)+1, int(day1)+1):
+                file1 = glob.glob(gps_path +str(day) + '*.nav') 
+                ds1 = xr.open_dataset(file1[0]) 
+
+                gpstime = np.concatenate((gpstime, ds1['time'].values)) 
+                lat_gps = np.concatenate((lat_gps, ds1['lat'].values)) 
+                lon_gps = np.concatenate((lon_gps, ds1['long'].values)) 
+
+        self.lat_gps = lat_gps
+        self.lon_gps = lon_gps
+        self.gps_time = gpstime
+
+        # transform gpstime from datetime to julian days since 1/1/1950 
+        gpstime = (gpstime - np.datetime64('1950-01-01T00:00:00')) / np.timedelta64(1, 'D') 
+
+
+        # change self.Lat_mvp and self.Lon_mvp to the GPS coordinates using gpstime to match 
+        self.Lon_mvp = np.zeros(( self.PRES_mvp.shape[0], self.PRES_mvp.shape[1])) 
+        self.Lat_mvp = np.zeros(( self.PRES_mvp.shape[0], self.PRES_mvp.shape[1])) 
+
+
+        # Tous les temps MVP sous forme d'un vecteur
+        time_flat = self.TIME_mvp.ravel()
+
+        # Position d'insertion dans gpstime (trié)
+        idx = np.searchsorted(gpstime, time_flat)
+
+        # Gestion des bords
+        idx = np.clip(idx, 1, len(gpstime)-1)
+
+        left = idx - 1
+        right = idx
+
+        # Choix du voisin le plus proche
+        nearest = np.where(
+            np.abs(time_flat - gpstime[left]) <= np.abs(gpstime[right] - time_flat),
+            left,
+            right
+        )
+
+        # Reconstruction des tableaux
+        self.Lat_mvp = lat_gps[nearest].reshape(self.PRES_mvp.shape)
+        self.Lon_mvp = lon_gps[nearest].reshape(self.PRES_mvp.shape)
+
+        print('GPS data loaded successfully.')
+        self.GPS = True
+
+    def load_GPS_from_csv(self, gps_path):
         """
         Load GPS data from a .csv file in the gps_path.
         Fills the object attributes with GPS data and associated metadata.
@@ -983,7 +1053,7 @@ class Analyzer:
         plt.legend()    
         plt.gca().invert_yaxis()
         plt.grid()
-        plt.xlabel(' Oxygen, umol/kg')    
+        plt.xlabel(' Oxygen, umol/L')    
         plt.ylabel('Pressure, dbar')
 
 
@@ -1013,7 +1083,22 @@ class Analyzer:
         plt.xlabel('Fluorescence, ug/L')
         plt.ylabel('Pressure, dbar')
 
-    def plot_diagramTS(self,id_mvp=None,id_ctd=None,correction=False):
+
+
+
+        if self.SUNA:
+            plt.figure()
+            plt.plot(self.NO3_suna[id_mvp], self.PRES_suna[id_mvp], label="downcast")
+            plt.plot(self.NO3_suna[id_mvp+1], self.PRES_suna[id_mvp+1], label="upcast")
+            plt.gca().invert_yaxis()
+            plt.legend()
+            plt.xlabel("NO3 (uM/L)")
+            plt.ylabel("Pressure (dbar)")
+            plt.grid()
+
+
+
+    def plot_diagramTS(self,id_mvp=None,id_ctd=None,correction=False,save=None):
         """
         Plot the TS diagram (Salinity vs Temperature) for one or more profiles, with isopycnals.
         Args:
@@ -1078,6 +1163,9 @@ class Analyzer:
         plt.legend()  
         plt.xlabel('Salinity, psu') 
         plt.ylabel('Temperature, C')
+
+        if save is not None:
+            plt.savefig(save)
 
     def stat_compar(self,id_mvp=[],id_ctd=None,num_sample=5000,cond=False,speed=False,correction=False):
         """
@@ -1369,7 +1457,7 @@ class Analyzer:
             plt.plot(Do_mvp_corr[mask],pres,label='MVP DO corrigé')
             plt.plot(oxy_ctd, pres, label='CTD DO')
             plt.gca().invert_yaxis()
-            plt.xlabel('Oxygène dissous [µmol/kg]')
+            plt.xlabel('Oxygène dissous [µmol/L]')
             plt.ylabel('Profondeur [m]')
             plt.title(f'Profil de DO - Profil {id_mvp} MVP vs Profil {id_ctd} CTD')
             plt.legend()
@@ -1497,6 +1585,100 @@ class Analyzer:
         print("MVP profiles corrected.")
 
 
+    def process_NO3(self,cal_file,only_new=False):
+
+        if not self.corrected:
+            raise ValueError("MVP data not corrected. Apply corrections first.")
+
+        if self.subdirs:
+            files = sorted(filter(os.path.isfile,glob.glob(self.data_path + '**/*.raw', recursive=True)))
+        else:
+            files = sorted(filter(os.path.isfile,glob.glob(self.data_path + '*.raw', recursive=self.subdirs)))
+
+
+        if only_new:
+            list_output = [f for f in os.listdir(self.output_path) if f.endswith(".nc")]
+            files = [f for f in files if not "MVP_"+os.path.basename(f).replace('.raw', '.nc') in list_output]
+
+    
+
+        time_suna = []
+        pressure_suna = []
+        no3_suna = []
+        lat_suna = []
+        lon_suna = []
+        temp_suna = []
+        sal_suna = []
+        
+
+        nprof = 0
+        for i in self.delp:
+            del files[i]
+        
+        for f in tqdm(files):
+
+            try:
+                (l_m_timestamp, l_pressure, l_dark, l_NO3_raw, l_spectre, l_d_line_raw, lat, lon, header_dt) = mvp.parse_SUNA(f,self.freq_echant)
+            except Exception as e:
+                print(f"Error processing {f}: {e}")
+
+            if np.isnan(l_pressure[0]) or l_pressure[0] is None:
+                l_pressure[0] = l_pressure[1]
+            
+            i_bottom = np.nanmin(np.where(l_pressure == np.max(l_pressure)))
+
+            #downcast
+            #interpolktat self.TEMP_mvp_corr onto the SUNA pressure levels
+            pres = l_pressure[:i_bottom]
+            temp = np.interp(pres, self.PRES_mvp_corr[nprof], self.TEMP_mvp_corr[nprof])
+            sal = np.interp(pres, self.PRES_mvp_corr[nprof], self.SALT_mvp_corr[nprof])
+            [no3_down,_] = no3_p.NO3_HSorens_RTQC(cal_file,nprof,temp,sal,pres,l_spectre[:i_bottom],l_dark[:i_bottom],l_NO3_raw[:i_bottom],N=41)
+            time_suna.append(l_m_timestamp[:i_bottom])
+            pressure_suna.append(l_pressure[:i_bottom])
+            no3_suna.append(no3_down)
+            lat_suna.append(lat)
+            lon_suna.append(lon)
+            temp_suna.append(temp)
+            sal_suna.append(sal)
+
+
+            nprof +=1
+            #upcast
+            pres = l_pressure[i_bottom:]
+            temp = np.interp(pres, self.PRES_mvp_corr[nprof], self.TEMP_mvp_corr[nprof])
+            sal = np.interp(pres, self.PRES_mvp_corr[nprof], self.SALT_mvp_corr[nprof])
+            [no3_up,_] = no3_p.NO3_HSorens_RTQC(cal_file,nprof,temp,sal,pres,l_spectre[i_bottom:],l_dark[i_bottom:],l_NO3_raw[i_bottom:],N=41)
+
+            time_suna.append(l_m_timestamp[i_bottom:])
+            pressure_suna.append(l_pressure[i_bottom:])
+            no3_suna.append(no3_up)
+            lat_suna.append(lat)
+            lon_suna.append(lon)
+            temp_suna.append(temp)
+            sal_suna.append(sal)
+
+
+
+            nprof +=1
+
+
+        self.TIME_suna = {i: sublist for i, sublist in enumerate(time_suna)}
+        self.PRES_suna = {i: sublist for i, sublist in enumerate(pressure_suna)}
+        self.NO3_suna = {i: sublist for i, sublist in enumerate(no3_suna)}
+        self.LAT_suna = {i: sublist for i, sublist in enumerate(lat_suna)}
+        self.LON_suna = {i: sublist for i, sublist in enumerate(lon_suna)}
+        self.TEMP_suna = {i: sublist for i, sublist in enumerate(temp_suna)}
+        self.SALT_suna = {i: sublist for i, sublist in enumerate(sal_suna)}
+
+
+        self.SUNA=True
+        print("SUNA data processed and stored in the object.")
+
+        
+
+
+
+
     def interpolate_CTD_and_MVPcorrected(self,length):
 
         """
@@ -1531,6 +1713,14 @@ class Analyzer:
             max_lenvspd = max([len(p) for p in self.SPEED_mvp_corr.values()])
             SPEED_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lenvspd - len(row)) for row in self.SPEED_mvp_corr.values()])
 
+        if self.SUNA:
+            max_lenno3 = max([len(p) for p in self.NO3_suna.values()])
+            NO3_suna_mat =  np.array([list(row) + [np.nan] * (max_lenno3 - len(row)) for row in self.NO3_suna.values()])
+            max_lenpresno3 = max([len(p) for p in self.PRES_suna.values()])
+            PRES_suna_mat = np.array([list(row) + [np.nan] * (max_lenpresno3 - len(row)) for row in self.PRES_suna.values()])
+
+
+
         max_lentime = max([len(p) for p in self.TIME_mvp_corr.values()])
         TIME_mvp_corr_mat =  np.array([list(row) + [np.nan] * (max_lentime - len(row)) for row in self.TIME_mvp_corr.values()])
 
@@ -1560,6 +1750,10 @@ class Analyzer:
         if self.speed:
             self.SPEED_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, SPEED_mvp_corr_mat, pressure_grid)
         self.TIME_mvp_corr_interp = mvp.vertical_interp(PRES_mvp_corr_mat, TIME_mvp_corr_mat, pressure_grid)
+
+        if self.SUNA:
+            self.NO3_mvp_corr_interp = mvp.vertical_interp(PRES_suna_mat, NO3_suna_mat, pressure_grid)
+
 
         print('CTD data interpolated onto corrected MVP pressure levels.')
 
@@ -2001,17 +2195,25 @@ class Analyzer:
                     'TEMP (°C)': temp,
                     'SAL (psu)': salt,
                     'COND (mS/cm)': cond,
-                    'OXY (µmol/kg)': oxy,
+                    'OXY (µmol/L)': oxy,
                     'TIME': datetimes,
                 }
+                
+                for attr, col in [('FLUO_mvp', 'FLUO (ug/L)'), ('TURB_mvp', 'TURB (NTU)'), ('PH_mvp', 'PH')]:
+                    if hasattr(self, attr):
+                        xp = self.PRES_mvp[prof_id]
+                        fp = getattr(self, attr)[prof_id]
+                        sort_idx = np.argsort(xp)
+                        xp_sorted, fp_sorted = xp[sort_idx], fp[sort_idx]
+                        # Étendre les bornes pour éviter les NaN de bord
+                        df_data[col] = np.interp(pres, xp_sorted, fp_sorted)  # sans left/right=nan
 
-                # Add optional fields if available
-                if hasattr(self, 'FLUO_mvp'):
-                    df_data['FLUO (ug/L)'] = np.interp(pres, self.PRES_mvp[prof_id], self.FLUO_mvp[prof_id], left=np.nan, right=np.nan)
-                if hasattr(self, 'TURB_mvp'):
-                    df_data['TURB (NTU)'] = np.interp(pres, self.PRES_mvp[prof_id], self.TURB_mvp[prof_id], left=np.nan, right=np.nan)
-                if hasattr(self, 'PH_mvp'):
-                    df_data['PH'] = np.interp(pres, self.PRES_mvp[prof_id], self.PH_mvp[prof_id], left=np.nan, right=np.nan)
+                if hasattr(self, 'NO3_suna'):
+                    xp = self.PRES_suna[prof_id]
+                    fp = self.NO3_suna[prof_id]
+                    sort_idx = np.argsort(xp)
+                    df_data['NO3 (µmol/L)'] = np.interp(pres, xp[sort_idx], fp[sort_idx])
+
 
                 if hasattr(self, 'Lat_mvp_corr_interp'):
                     lat = self.Lat_mvp_corr_interp[prof_id][:len(pres)]
@@ -2024,6 +2226,7 @@ class Analyzer:
                 df_data['LON (°E)'] = lon
 
                 df = pd.DataFrame(df_data)
+                df = df.sort_values('TIME', kind='mergesort').reset_index(drop=True)
 
                 if per_profile_files:
                     fname = f"{base_name}_profile_{prof_id:03d}.csv"
@@ -2040,6 +2243,7 @@ class Analyzer:
                         df_all = pd.concat([df_all, df], ignore_index=True)
 
             if not per_profile_files:
+                df_all = df_all.sort_values('TIME', kind='mergesort').reset_index(drop=True)
                 df_all.to_csv(filepath, index=False, na_rep='NaN')
                 print(f"CSV written (corrected, single file): {filepath}")
             else:
@@ -2075,25 +2279,36 @@ class Analyzer:
                     'DO (ml/L)': do,
                     'TIME': datetimes,
                 }
+                for attr, col in [('FLUO_mvp', 'FLUO (ug/L)'), ('TURB_mvp', 'TURB (NTU)'), ('PH_mvp', 'PH')]:
+                    if hasattr(self, attr):
+                        xp = self.TIME_mvp[prof_id]      # temps brut (axe source)
+                        fp = getattr(self, attr)[prof_id]
+                        target_time = self.TIME_mvp_corr[prof_id]  # temps corrigé (axe cible)
 
-                # Add optional fields
-                if hasattr(self, 'SOUNDVEL_mvp'):
-                    df_data['SOUNDVEL (m/s)'] = self.SOUNDVEL_mvp[prof_id]
-                if hasattr(self, 'TEMP2_mvp'):
-                    df_data['TEMP2 (°C)'] = self.TEMP2_mvp[prof_id]
-                if hasattr(self, 'FLUO_mvp'):
-                    df_data['FLUO (ug/L)'] = self.FLUO_mvp[prof_id]
-                if hasattr(self, 'TURB_mvp'):
-                    df_data['TURB (NTU)'] = self.TURB_mvp[prof_id]
-                if hasattr(self, 'PH_mvp'):
-                    df_data['PH'] = self.PH_mvp[prof_id]
-                if hasattr(self, 'SUNA_mvp'):
-                    df_data['SUNA'] = self.SUNA_mvp[prof_id]
+                        # Trier par temps croissant
+                        sort_idx = np.argsort(xp)
+                        xp_s, fp_s = xp[sort_idx], fp[sort_idx]
+
+                        # Supprimer doublons temporels
+                        _, unique_idx = np.unique(xp_s, return_index=True)
+                        df_data[col] = np.interp(target_time, xp_s[unique_idx], fp_s[unique_idx])
+
+                if hasattr(self, 'NO3_suna'):
+                    xp = self.TIME_suna[prof_id]
+                    fp = self.NO3_suna[prof_id]
+                    target_time = self.TIME_mvp_corr[prof_id]
+
+                    sort_idx = np.argsort(xp)
+                    xp_s, fp_s = xp[sort_idx], fp[sort_idx]
+
+                    _, unique_idx = np.unique(xp_s, return_index=True)
+                    df_data['NO3 (µmol/L)'] = np.interp(target_time, xp_s[unique_idx], fp_s[unique_idx])
 
                 df_data['LAT (°N)'] = self.Lat_mvp[prof_id]
                 df_data['LON (°E)'] = self.Lon_mvp[prof_id]
 
                 df = pd.DataFrame(df_data)
+                df = df.sort_values('TIME', kind='mergesort').reset_index(drop=True)
 
                 if per_profile_files:
                     fname = f"{base_name}_profile_{prof_id:03d}.csv"
@@ -2110,13 +2325,13 @@ class Analyzer:
                         df_all = pd.concat([df_all, df], ignore_index=True)
 
             if not per_profile_files:
+                df_all = df_all.sort_values('TIME', kind='mergesort').reset_index(drop=True)
                 df_all.to_csv(filepath, index=False, na_rep='NaN')
                 print(f"CSV written (raw, single file): {filepath}")
             else:
                 print(f"CSV written (raw, per-profile) into: {base_dir}")
 
             
-
 
     def help(self):
         """
@@ -2129,7 +2344,51 @@ class Analyzer:
                 print(f"{attr}:\n{doc}\n{'-'*40}")      
 
 
-    def plot_MVP_transect(self,VAR='TEMP',l_id=None,depth_max=None,depth_min=None,vmax=None,vmin=None,cmap=None):
+    def compute_dist(self):
+        lat = self.Lat_mvp_corr_interp
+        lon = self.Lon_mvp_corr_interp
+
+        n_profiles, n_points = self.PRES_mvp_corr_interp.shape
+
+        dist_all = np.full_like(self.PRES_mvp_corr_interp, np.nan, dtype=float)
+
+        dist_cum = 0.0
+        prev_lat, prev_lon = None, None
+
+        for i in range(n_profiles):
+            valid_j = np.where(~np.isnan(lat[i, :]) & ~np.isnan(lon[i, :]))[0]
+            if len(valid_j) == 0:
+                continue
+
+            j_first, j_last = valid_j[0], valid_j[-1]
+            lat_first, lon_first = lat[i, j_first], lon[i, j_first]
+            lat_last, lon_last = lat[i, j_last], lon[i, j_last]
+
+            if prev_lat is not None:
+                gap = geodesic((prev_lat, prev_lon), (lat_first, lon_first)).km
+                dist_cum += gap
+            else:
+                gap = 0.0
+
+            dist_profile = geodesic((lat_first, lon_first), (lat_last, lon_last)).km if j_last != j_first else 0.0
+
+
+            dist_all[i, j_first] = dist_cum
+
+            if j_last != j_first:
+                for j in valid_j:
+                    frac = (j - j_first) / (j_last - j_first)
+                    dist_all[i, j] = dist_cum + frac * dist_profile
+
+            dist_cum += dist_profile
+            prev_lat, prev_lon = lat_last, lon_last
+
+        self.DIST_interp = dist_all
+        self.dist = True
+
+                
+
+    def plot_MVP_transect(self,VAR='TEMP',l_id=None,depth_max=None,depth_min=None,vmax=None,vmin=None,cmap=None,save=None,mask=None,save_ncdf=None):
         """
         Plot a section of 2D inteprolated MVP data
         Args:
@@ -2146,7 +2405,11 @@ class Analyzer:
 
         if hasattr(self, 'PRES_mvp_corr_interp') == False:
             raise ValueError("Corrected and interpolated MVP data not available. Apply corrections and interpolation first.")
-        
+
+
+        if  self.dist is False or self.corrected is False:
+                    raise ValueError("MVP data must be corrected and distance must be computed before plotting transect. Call self.mvp_correction() and self.compute_distance() first.")
+
         if l_id is None:
             l_id = list(range(self.PRES_mvp_corr_interp.shape[0]))
 
@@ -2166,7 +2429,7 @@ class Analyzer:
             case 'PH':
                 var = self.PH_mvp_corr_interp
             case 'SUNA':
-                var = self.SUNA_mvp_corr_interp
+                var = self.NO3_mvp_corr_interp
             case 'SPEED':
                 var = self.SPEED_mvp_corr_interp
             case _: 
@@ -2175,47 +2438,17 @@ class Analyzer:
 
 
         P = self.PRES_mvp_corr_interp[l_id]
-        if hasattr(self, 'Lat_mvp_corr_interp') and hasattr(self, 'Lon_mvp_corr_interp'):
-            lat = self.Lat_mvp_corr_interp[l_id]
-            lon = self.Lon_mvp_corr_interp[l_id]
-        else:
-            lat = self.Lat_mvp[l_id]
-            lon = self.Lon_mvp[l_id]
-            # Interpolate lat/lon between profiles to ensure spatial variation
-            lat_interp = np.zeros_like(lat)
-            lon_interp = np.zeros_like(lon)
+        lat = self.Lat_mvp_corr_interp[l_id]
+        lon = self.Lon_mvp_corr_interp[l_id]
 
-            for i in range(len(lat)):
-                # Starting position (first valid point of profile i)
-                lat_start = lat[i, 0]
-                lon_start = lon[i, 0]
         
-                # Ending position
-                if i < len(lat) - 1:
-                    # Use starting position of next profile
-                    lat_end = lat[i+1, 0]
-                    lon_end = lon[i+1, 0]
-                else:
-                    # For last profile, extrapolate based on trend from previous profile
-                    if i > 0:
-                        lat_end = lat[i, 0] + (lat[i, 0] - lat[i-1, 0])
-                        lon_end = lon[i, 0] + (lon[i, 0] - lon[i-1, 0])
-                    else:
-                        # Only one profile, add small spatial variation
-                        lat_end = lat_start
-                        lon_end = lon_start
-        
-                # Interpolate lat/lon for all depth points in this profile
-                for j in range(len(lat[i])):
-                    frac = j / max(1, len(lat[i]) - 1)  # 0 to 1
-                    lat_interp[i, j] = lat_start + frac * (lat_end - lat_start)
-                    lon_interp[i, j] = lon_start + frac * (lon_end - lon_start)
-            lat = lat_interp
-            lon = lon_interp
 
 
 
         T = var[l_id]
+        Lat = self.Lat_mvp_corr_interp[l_id]
+        Lon = self.Lon_mvp_corr_interp[l_id]
+
 
         if depth_max is None:
             depth_max = np.nanmax(P)
@@ -2225,41 +2458,25 @@ class Analyzer:
 
         n_profiles, n_points = T.shape
 
-        # compute distance
-        dist_cum = 0
-        dist_all = np.zeros_like(T)
-
-        for i in range(n_profiles):
-            dist_i = np.zeros(n_points)
-            last_valid = None
-            for j in range(n_points):
-                if np.isnan(lat[i,j]) or np.isnan(lon[i,j]):
-                    dist_i[j] = np.nan
-                else:
-                    if last_valid is None:
-                        dist_i[j] = 0
-                    else:
-                        dist_i[j] = dist_i[last_valid] + geodesic(
-                            (lat[i,last_valid], lon[i,last_valid]),
-                            (lat[i,j], lon[i,j])
-                        ).km
-                    last_valid = j
-
-            dist_i += dist_cum
-            if np.any(~np.isnan(dist_i)):
-                dist_cum = np.nanmax(dist_i)
-            dist_all[i,:] = dist_i
-
-        # interpolation
+        dist_all = self.DIST_interp[l_id]
         dist_flat = dist_all.flatten()
+        time_flat = self.TIME_mvp_corr_interp[l_id].flatten()
+        # convert from julian days to datetime
+        datetime_flat = self.DATETIME_mvp
+
         T_flat = T.flatten()
         P_flat = P.flatten()
+        Lat_flat = Lat.flatten()
+        Lon_flat = Lon.flatten()
 
         # del nan
-        mask = ~np.isnan(dist_flat) & ~np.isnan(T_flat) & ~np.isnan(P_flat)
-        dist_flat = dist_flat[mask]
-        P_flat = P_flat[mask]
-        T_flat = T_flat[mask]
+        valid_mask = ~np.isnan(dist_flat) & ~np.isnan(T_flat) & ~np.isnan(P_flat)
+        dist_flat = dist_flat[valid_mask]
+        P_flat = P_flat[valid_mask]
+        T_flat = T_flat[valid_mask]
+        Lat_flat = Lat_flat[valid_mask]
+        Lon_flat = Lon_flat[valid_mask]
+
 
         # Check for degenerate case: all points have same x or y coordinate
         if len(dist_flat) < 3 or np.std(dist_flat) == 0 or np.std(P_flat) == 0:
@@ -2273,6 +2490,26 @@ class Analyzer:
         P_grid = np.linspace(depth_min, depth_max, 1200)
         DIST, PRES = np.meshgrid(dist_grid, P_grid)
 
+        gap_bounds = None
+
+        if mask is not None :
+            gap_bounds = []
+            for i in mask:
+                i0 = int(mask[i][0])
+                i1 = int(mask[i][1])
+                if 0 <= i0 < n_profiles and 0 <= i1 < n_profiles:
+                    d0 = np.nanmax(dist_all[i0, :])
+                    d1 = np.nanmin(dist_all[i1, :])
+                    if np.isfinite(d0) and np.isfinite(d1):
+                        gap_bounds.append((min(d0, d1), max(d0, d1)))
+
+        dif_distance = np.diff(dist_flat)
+        if np.any(dif_distance >20):
+            gap_bounds=[]
+            for i in range(len(dif_distance)):
+                if dif_distance[i] > 20:
+                    gap_bounds.append((dist_flat[i], dist_flat[i+1]))
+
         # 2D interp
         T_grid = griddata(
             (dist_flat, P_flat),
@@ -2281,10 +2518,29 @@ class Analyzer:
             method='linear'
         )
 
+        Lat_grid = griddata(
+            (dist_flat, P_flat),
+            Lat_flat,
+            (DIST, PRES),
+            method='linear'
+        )
+
+        Lon_grid = griddata(
+            (dist_flat, P_flat),
+            Lon_flat,
+            (DIST, PRES),
+            method='linear'
+        )
+
         # -----------------------------
         # 5. Lissage pour adoucir les frontières
         # -----------------------------
         T_grid_smooth = gaussian_filter(T_grid, sigma=2)
+
+        if gap_bounds is not None:
+            for gap_start, gap_end in gap_bounds:
+                in_gap = (dist_grid >= gap_start) & (dist_grid <= gap_end)
+                T_grid_smooth[:, in_gap] = np.nan
 
         if vmax is None:
             vmax = np.nanmax(T_grid_smooth)
@@ -2303,7 +2559,84 @@ class Analyzer:
         ax.set_title(f"{VAR} transect (interpolated)")
         cbar = plt.colorbar(pcm, ax=ax)
         cbar.set_label(f"{VAR} (units)")
+
+
+
+        n_dates = len(self.DATETIME_mvp)
+        # lignes paires correspondantes dans le tableau complet DIST_interp
+        profile_rows_full = np.arange(0, 2 * n_dates, 2)  # 0, 2, 4, ..., jusqu'à n_dates dates
+
+        # ne garder que les profils présents dans la sélection l_id
+        keep = np.isin(profile_rows_full, l_id)
+        profile_rows_sel = profile_rows_full[keep]
+        datetime_sel = np.asarray(self.DATETIME_mvp)[keep]
+
+        if len(profile_rows_sel) >= 2:
+            # position représentative en distance pour chaque profil (moyenne le long de la ligne)
+            dist_positions = np.array([
+                np.nanmean(self.DIST_interp[row, :]) for row in profile_rows_sel
+            ])
+
+            # tri par distance croissante (requis pour l'interpolation)
+            order = np.argsort(dist_positions)
+            dist_positions = dist_positions[order]
+            datetime_sel = np.asarray(datetime_sel)[order]
+
+            # retirer d'éventuels doublons de distance
+            dist_unique, unique_idx = np.unique(dist_positions, return_index=True)
+            datenum_unique = mdates.date2num(datetime_sel[unique_idx])
+
+            def dist_to_datenum(d):
+                return np.interp(d, dist_unique, datenum_unique)
+
+            def datenum_to_dist(n):
+                return np.interp(n, datenum_unique, dist_unique)
+
+            secax = ax.secondary_xaxis(-0.18, functions=(dist_to_datenum, datenum_to_dist))
+            secax.set_xticks(datenum_unique[::5])  # une date sur 5
+            secax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %Hh'))  # mois/jour heure
+            secax.tick_params(axis='x', rotation=45, labelsize=8)
+
+            fig.subplots_adjust(bottom=0.28)
+        else:
+            print("Warning: pas assez de dates disponibles pour l'axe secondaire (DATETIME_mvp).")
+
+        if gap_bounds is not None:
+            for gap_start, gap_end in gap_bounds:
+                ax.axvspan(gap_start, gap_end, color='gray', alpha=1, zorder=5)
+
+        if save is not None:
+            plt.savefig(save)
+
+        self.dist_grid = dist_grid
+        self.P_grid = P_grid
+        if save_ncdf is not None:
+            # Save the interpolated transect data to a NetCDF file
+            ds_transect = xr.Dataset(
+                {
+                    VAR: (('depth', 'distance'), T_grid_smooth),
+                    'lat': (('depth', 'distance'), self.Lat_mvp_corr_interp),
+                    'lon': (('depth', 'distance'), self.Lon_mvp_corr_interp)
+                },
+                coords={
+                    'depth': P_grid,
+                    'distance': dist_grid,
+                    'date': datenum_unique,
+                },
+                attrs={
+                    'title': f'Interpolated {VAR} transect',
+                    'source': 'MVP data',
+                    'created_on': datetime.now().isoformat()
+                }
+            )
+            ds_transect.to_netcdf(save_ncdf)
+            print(f"Interpolated transect data saved to {save_ncdf}")
+            
         plt.show()
+
+
+
+
 
 
 
@@ -2351,7 +2684,7 @@ class Analyzer:
                 var = self.PH_mvp_corr_interp
                 delta = 0.1 if delta is None else delta
             case 'SUNA':
-                var = self.SUNA_mvp_corr_interp
+                var = self.NO3_mvp_corr_interp
                 delta = 0.5 if delta is None else delta
             case 'SPEED':
                 var = self.SPEED_mvp_corr_interp
