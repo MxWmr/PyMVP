@@ -200,22 +200,32 @@ def read_mvp_cycle_raw(mvp_dat_name):
             continue  # ignorer les lignes Z
         if line[0] == 'M':
             words = line.split()
-            if len(words) < 11:
+            if len(words) != 11:
                 continue
             try:
-                pres.append(float(words[1]))
-                soundvel.append(float(words[2]))
-                cond.append(float(words[3]))
-                temp.append(float(words[4]))
-                dox.append(float(words[5]))
-                temp2.append(float(words[6]))
-                suna.append(float(words[7]))
-                fluo.append(float(words[8]))
-                turb.append(float(words[9]))
-                ph.append(float(words[10]))
-            except Exception:
+                p = float(words[1])
+                sv = float(words[2])
+                c = float(words[3])
+                t = float(words[4])
+                o = float(words[5])
+                t2 = float(words[6])
+                s = float(words[7])
+                f = float(words[8])
+                tu = float(words[9])
+                hp = float(words[10])
+            except ValueError:
                 continue
 
+            pres.append(p)
+            soundvel.append(sv)
+            cond.append(c)
+            temp.append(t)
+            dox.append(o)
+            temp2.append(t2)
+            suna.append(s)
+            fluo.append(f)
+            turb.append(tu)
+            ph.append(hp)
     fdat.close()
 
     # Convertir en numpy arrays
@@ -805,7 +815,7 @@ def bin_average(P,T,C,time,dp=0.05):
 
 
 
-def bin_average_v2(P,T,C,S,time,dp=0.05):
+def bin_average_v2(P,T,C,S,time,dp=0.1):
     """
     Bin average data by pressure.
 
@@ -1088,19 +1098,19 @@ def parse_SUNA(suna_file,m_line_frequency=20) :
             # but the raw line already has the 'D 0x...' together with commas
             fields = stripped.split(",")
             # fields[0] = "D 0x7900"  (or similar)
- 
+
             try:
                 dark   = float(fields[18])   # 19th field  (0-indexed: 18)
                 NO3_raw = float(fields[21])  # 22nd field  (0-indexed: 21)
                 spectre = fields[-2].strip() # second-to-last
                 spectre_list = [int(spectre[i:i+4], 16) for i in range(0, len(spectre), 4)]
+                if len(spectre_list)!=41:
+                    continue
+                # print('spectre length:',len(spectre_list))
             except (IndexError, ValueError) as exc:
                 # Malformed D line – skip but warn
-                print(f"Warning: could not parse D line ({exc}): {stripped[:80]}")
-                print(f"Raw line: {stripped} ")
-                print(lines[n-1])
-                print(line)
-                print(lines[n+1])
+                # print(f"Warning: could not parse D line ({exc}): {stripped[:80]}")
+
                 continue
  
             # Compute M-line timestamp
@@ -1211,3 +1221,90 @@ def _parse_header_datetime(header: str) -> Optional[datetime]:
     return datetime(yyyy, mo, dd, hh, mm, ss, us)
  
  
+
+
+def correct_suna(suna,pres,coeff=None,offset=0):
+    """
+    Corrects the SUNA data based on a polynomial function of pressure.
+    
+    Parameters:
+    suna : array-like
+        The original SUNA data to be corrected.
+    pres : array-like
+        The corresponding pressure values for the SUNA data.
+    coeff : list
+        Coefficients of the polynomial function (default is None, which means the function will compute the coefficients).
+    offset : float
+        An optional offset to be added to the corrected SUNA data (default is 0).
+        
+    Returns:
+    corrected_suna : array-like
+        The corrected SUNA data.
+    """
+
+    
+
+    
+    if type(suna) is  dict:
+        corrected_suna = {}
+
+        # compute mean diff and fit polynomial function if coeff is None
+        if coeff is None:
+            diff_in = []
+            pressure = pres[0]
+            for i in range(len(suna)//2):
+
+                order = np.argsort(pres[2*i+1])
+                up_interp = np.interp(pressure, pres[2*i+1][order], suna[2*i+1][order])
+                order = np.argsort(pres[2*i])
+                down_interp = np.interp(pressure, pres[2*i][order], suna[2*i][order])
+                diff_in.append(up_interp-down_interp)
+
+            mean_diff = np.mean(diff_in, axis=0)
+            mask = np.isfinite(pressure) & np.isfinite(mean_diff)
+
+            coeff = np.polyfit(pressure[mask], mean_diff[mask], deg=3)
+                
+    elif type(suna) is np.ndarray:
+        corrected_suna = np.zeros_like(suna)
+        if coeff is None:
+
+            pressure = pres[0]
+            mean_diff = np.nanmean(suna[1::2]-suna[0::2], axis=0)
+            mask = np.isfinite(pressure) & np.isfinite(mean_diff)
+            coeff = np.polyfit(pressure[mask], mean_diff[mask], deg=3)
+
+    elif type(suna) is list:
+        corrected_suna = [None]*len(suna)
+        if coeff is None:
+            diff_in = []
+            pressure = pres[0]
+            for i in range(len(suna)//2):
+
+                order = np.argsort(pres[2*i+1])
+                up_interp = np.interp(pressure, pres[2*i+1][order], suna[2*i+1][order])
+                order = np.argsort(pres[2*i])
+                down_interp = np.interp(pressure, pres[2*i][order], suna[2*i][order])
+                diff_in.append(up_interp-down_interp)
+
+            mean_diff = np.mean(diff_in, axis=0)
+            mask = np.isfinite(pressure) & np.isfinite(mean_diff)
+
+            coeff = np.polyfit(pressure[mask], mean_diff[mask], deg=3)
+                      
+    else:
+        raise ValueError("Unsupported data type for 'suna'. Must be dict, ndarray, or list.")
+
+
+    fit_func = np.poly1d(coeff)
+
+
+
+    for i in range(len(suna)//2):
+        
+        corrected_suna[2*i] = suna[2*i] + fit_func(pres[2*i]) + offset
+        corrected_suna[2*i+1] = suna[2*i+1] 
+
+    
+
+    return corrected_suna
