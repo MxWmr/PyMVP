@@ -19,6 +19,8 @@
 
 
 
+from re import L
+
 import numpy as np 
 import glob
 from datetime import datetime, timedelta
@@ -61,7 +63,7 @@ class Analyzer:
         return "0.3.2"
 
 
-    def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None,outlier_temp=35,outlier_cond=55):
+    def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None,outlier_temp=35,outlier_cond=55,offset_cond=0,offset_temp=0,offset_oxy=0):
         """
         Load MVP data from .raw and .log files in the data_path folder.
         Fills the object attributes with data matrices and associated metadata.
@@ -76,6 +78,7 @@ class Analyzer:
         self.data_path = data_path
         self.subdirs = subdirs
         self.output_path = output_path
+        self.oxy_offset = offset_oxy
 
         if format=='raw':
             if self.subdirs:
@@ -318,8 +321,8 @@ class Analyzer:
          
         self.PRES_mvp = PRES_mvp
         self.SOUNDVEL_mvp = SOUNDVEL_mvp
-        self.COND_mvp = COND_mvp
-        self.TEMP_mvp = TEMP_mvp
+        self.COND_mvp = COND_mvp+offset_cond
+        self.TEMP_mvp = TEMP_mvp+offset_temp
         self.DO_mvp = DO_mvp
         self.TEMP2_mvp = TEMP_mvp2
         self.SUNA_mvp = SUNA_mvp
@@ -597,7 +600,7 @@ class Analyzer:
         self.convert_DO_to_umolL()
 
 
-    def load_ctd_data(self,data_path_ctd):
+    def load_ctd_data(self,data_path_ctd,format='ncdf'):
         """
         Load CTD data from .nc files in the data_path_ctd folder.
         Fills the object attributes with data matrices and associated metadata.
@@ -605,61 +608,109 @@ class Analyzer:
             data_path_ctd (str): Path to the folder containing CTD files.
         """
 
-
-        list_of_ctd_files = sorted(filter(os.path.isfile,\
-                        glob.glob(data_path_ctd + 'CTD'+'*.nc')))
-        
-        print('Found ' + str(len(list_of_ctd_files)) + ' CTD files in the directory: ' + data_path_ctd)
-
-
+        if format=='ncdf':
+            list_of_ctd_files = sorted(filter(os.path.isfile,\
+                            glob.glob(data_path_ctd +'*.nc')))
+            
+            print('Found ' + str(len(list_of_ctd_files)) + ' CTD files in the directory: ' + data_path_ctd)
 
 
 
-        # keys: ['scan', 'timeJ', 'timeQ', 'LATITUDE', 'LONGITUDE', 'PRES', 'TEMP', 'CNDC', 'descentrate', 'flECO-AFL', 'v1', 'wetCDOM', 'v0', 'turbWETntu0', 'v5', 'CStarTr0', 'CStarAt0', 'oxygen_ml_L', 'oxsolML/L', 'v2', 'flag', 'timeS']
-        LAT_ctd_temp = []
-        LON_ctd_temp = []
-        PRES_ctd_temp = []
-        TEMP_ctd_temp = []
-        COND_ctd_temp = []
-        TURB_ctd_temp = []
-        oxy_ctd_temp = []
-        FLUO_ctd_temp = []
-        CDOM_ctd_temp = []
-        DATETIME_ctd = []
-        SALT_ctd_temp = []
 
-        for f in list_of_ctd_files:
-            nc = xr.open_dataset(f)
-            PRES_ctd_temp.append(nc['PRES'].values[0])
-            PRES_ctd_temp.append(nc['PRES'].values[1])
-            TEMP_ctd_temp.append(nc['TEMP'].values[0])
-            TEMP_ctd_temp.append(nc['TEMP'].values[1])
-            COND_ctd_temp.append(nc['COND'].values[0])
-            COND_ctd_temp.append(nc['COND'].values[1])
-            SALT_ctd_temp.append(nc['SAL'].values[0])
-            SALT_ctd_temp.append(nc['SAL'].values[1])
-            TURB_ctd_temp.append(nc['TURB'].values[0])
-            TURB_ctd_temp.append(nc['TURB'].values[1])
-            oxy_ctd_temp.append(nc['OXY'].values[0])
-            oxy_ctd_temp.append(nc['OXY'].values[1])
-            FLUO_ctd_temp.append(nc['FLUO'].values[0])
-            FLUO_ctd_temp.append(nc['FLUO'].values[1])
-            CDOM_ctd_temp.append(nc['CDOM'].values[0])
-            CDOM_ctd_temp.append(nc['CDOM'].values[1])
-            LAT_ctd_temp.append(nc['LATITUDE'].values[0])
-            LAT_ctd_temp.append(nc['LATITUDE'].values[1])
-            LON_ctd_temp.append(nc['LONGITUDE'].values[0])
-            LON_ctd_temp.append(nc['LONGITUDE'].values[1])
-            DATETIME_ctd.append(nc['profile_time'].values[0])
 
-            nc.close()
+            # keys: ['scan', 'timeJ', 'timeQ', 'LATITUDE', 'LONGITUDE', 'PRES', 'TEMP', 'CNDC', 'descentrate', 'flECO-AFL', 'v1', 'wetCDOM', 'v0', 'turbWETntu0', 'v5', 'CStarTr0', 'CStarAt0', 'oxygen_ml_L', 'oxsolML/L', 'v2', 'flag', 'timeS']
+            LAT_ctd_temp = []
+            LON_ctd_temp = []
+            PRES_ctd_temp = []
+            TEMP_ctd_temp = []
+            COND_ctd_temp = []
+            TURB_ctd_temp = []
+            oxy_ctd_temp = []
+            FLUO_ctd_temp = []
+            CDOM_ctd_temp = []
+            DATETIME_ctd = []
+            SALT_ctd_temp = []
+
+            for f in list_of_ctd_files:
+                nc = xr.open_dataset(f)
+                PRES_ctd_temp.append(nc['PRES'].values[0])
+                PRES_ctd_temp.append(nc['PRES'].values[1])
+                TEMP_ctd_temp.append(nc['TEMP'].values[0])
+                TEMP_ctd_temp.append(nc['TEMP'].values[1])
+                COND_ctd_temp.append(nc['COND'].values[0])
+                COND_ctd_temp.append(nc['COND'].values[1])
+                SALT_ctd_temp.append(nc['SAL'].values[0])
+                SALT_ctd_temp.append(nc['SAL'].values[1])
+                TURB_ctd_temp.append(nc['TURB'].values[0])
+                TURB_ctd_temp.append(nc['TURB'].values[1])
+                oxy_ctd_temp.append(nc['OXY'].values[0])
+                oxy_ctd_temp.append(nc['OXY'].values[1])
+                FLUO_ctd_temp.append(nc['FLUO'].values[0])
+                FLUO_ctd_temp.append(nc['FLUO'].values[1])
+                CDOM_ctd_temp.append(nc['CDOM'].values[0])
+                CDOM_ctd_temp.append(nc['CDOM'].values[1])
+                LAT_ctd_temp.append(nc['LATITUDE'].values[0])
+                LAT_ctd_temp.append(nc['LATITUDE'].values[1])
+                LON_ctd_temp.append(nc['LONGITUDE'].values[0])
+                LON_ctd_temp.append(nc['LONGITUDE'].values[1])
+                DATETIME_ctd.append(nc['profile_time'].values[0])
+
+                nc.close()
+
+        elif format=='cnv':
+            list_of_ctd_files = sorted(filter(os.path.isfile,\
+                            glob.glob(data_path_ctd +'*.cnv')))
+            
+            print('Found ' + str(len(list_of_ctd_files)) + ' CTD files in the directory: ' + data_path_ctd)
+
+            LAT_ctd_temp = []
+            LON_ctd_temp = []
+            PRES_ctd_temp = []
+            TEMP_ctd_temp = []
+            COND_ctd_temp = []
+            TURB_ctd_temp = []
+            oxy_ctd_temp = []
+            FLUO_ctd_temp = []
+            CDOM_ctd_temp = []
+            DATETIME_ctd = []
+            SALT_ctd_temp = []
+
+            for f in list_of_ctd_files:
+                ctd_data,nmea_datetime = mvp.read_cnv(f)
+                PRES_ctd_temp.append(ctd_data['prDM'].values)
+                TEMP_ctd_temp.append(ctd_data['t090C'].values)
+                COND_ctd_temp.append(ctd_data['c0mS/cm'].values)
+                SALT_ctd_temp.append(ctd_data['sal00'].values)
+                # TURB_ctd_temp.append(ctd_data['TURB'].values)
+                oxy_ctd_temp.append(ctd_data['sbeox0ML/L'].values)
+                FLUO_ctd_temp.append(ctd_data['flECO-AFL'].values)
+                # CDOM_ctd_temp.append(ctd_data['CDOM'].values)
+                LAT_ctd_temp.append(ctd_data['latitude'].values)
+                LON_ctd_temp.append(ctd_data['longitude'].values)
+                DATETIME_ctd.append(nmea_datetime)
+
+
+            # complete shorter arrays with NaN to match the length of the longest array
+            max_length = max(len(arr) for arr in PRES_ctd_temp)
+            for i, arr in enumerate(PRES_ctd_temp):
+                if len(arr) < max_length:
+                    PRES_ctd_temp[i] = np.pad(arr, (0, max_length - len(arr)), constant_values=np.nan)
+                    TEMP_ctd_temp[i] = np.pad(TEMP_ctd_temp[i], (0, max_length - len(TEMP_ctd_temp[i])), constant_values=np.nan)
+                    COND_ctd_temp[i] = np.pad(COND_ctd_temp[i], (0, max_length - len(COND_ctd_temp[i])), constant_values=np.nan)
+                    SALT_ctd_temp[i] = np.pad(SALT_ctd_temp[i], (0, max_length - len(SALT_ctd_temp[i])), constant_values=np.nan)
+                    # TURB_ctd_temp[i] = np.pad(TURB_ctd_temp[i], (0, max_length - len(TURB_ctd_temp[i])), constant_values=np.nan)
+                    oxy_ctd_temp[i] = np.pad(oxy_ctd_temp[i], (0, max_length - len(oxy_ctd_temp[i])), constant_values=np.nan)
+                    FLUO_ctd_temp[i] = np.pad(FLUO_ctd_temp[i], (0, max_length - len(FLUO_ctd_temp[i])), constant_values=np.nan)
+                    # CDOM_ctd_temp[i] = np.pad(CDOM_ctd_temp[i], (0, max_length - len(CDOM_ctd_temp[i])), constant_values=np.nan)
+                    LAT_ctd_temp[i] = np.pad(LAT_ctd_temp[i], (0, max_length - len(LAT_ctd_temp[i])), constant_values=np.nan)
+                    LON_ctd_temp[i] = np.pad(LON_ctd_temp[i], (0, max_length - len(LON_ctd_temp[i])), constant_values=np.nan)
 
         self.PRES_ctd = np.array(PRES_ctd_temp)
         self.TEMP_ctd = np.array(TEMP_ctd_temp)
         self.COND_ctd = np.array(COND_ctd_temp)
         self.SALT_ctd = np.array(SALT_ctd_temp)
         self.TURB_ctd = np.array(TURB_ctd_temp)
-        self.oxy_ctd = np.array(oxy_ctd_temp)
+        self.oxy_ctd = np.array(oxy_ctd_temp)*44.661 # convert from ml/L to umol/L
         self.FLUO_ctd = np.array(FLUO_ctd_temp)
         self.CDOM_ctd = np.array(CDOM_ctd_temp)
         self.LAT_ctd = np.array(LAT_ctd_temp)
@@ -805,7 +856,7 @@ class Analyzer:
             print('CTD data:')
             print('Number of profiles: ' + str(len(self.DATETIME_ctd)))
             for i in range(0,len(self.DATETIME_ctd)):
-                print(f"  Profil down {2*i} - Profil up {2*i+1} - Latitude: {self.LAT_ctd[2*i,0]:.5f}, Longitude: {self.LON_ctd[2*i,0]:.5f}, Date/Heure: {self.DATETIME_ctd[i]}")
+                print(f"  Profil {i} - Latitude: {self.LAT_ctd[i,0]:.5f}, Longitude: {self.LON_ctd[i,0]:.5f}, Date/Heure: {self.DATETIME_ctd[i]}")
 
 
     def keep_selected_profiles(self, id_mvp, id_ctd=None):
@@ -822,8 +873,8 @@ class Analyzer:
         l_id2 = []
         for i in id_mvp:
             l_id.append(i)
-            l_id.append(i+1)  # Add the next profile for the up profile 
-            l_id2.append(i//2) 
+            if i%2==0:
+                l_id2.append(i//2) 
 
 
   
@@ -843,32 +894,31 @@ class Analyzer:
             self.PH_mvp = self.PH_mvp[l_id,:]
             self.SALT_mvp = self.SALT_mvp[l_id,:]
             self.TIME_mvp = self.TIME_mvp[l_id,:]
-            self.Lat_mvp = self.Lat_mvp[l_id,:]
-            self.Lon_mvp = self.Lon_mvp[l_id,:]
+            try:
+                self.Lat_mvp = self.Lat_mvp[l_id,:]
+                self.Lon_mvp = self.Lon_mvp[l_id,:]
+            except:
+                self.LAT_mvp = self.LAT_mvp[l_id]
+                self.LON_mvp = self.LON_mvp[l_id]
             self.DATETIME_mvp = np.array(self.DATETIME_mvp)[l_id2]
             self.DIR = np.array(self.DIR)[l_id]
             self.label_mvp = np.array(self.label_mvp)[l_id]
 
         if self.ctd and id_ctd != None:
 
-            l_id = []
-            l_id2 = []
-            for i in id_ctd:
-                l_id.append(i)
-                l_id.append(i+1)  # Add the next profile for the up profile 
-                l_id2.append(i//2) 
+            l_id = id_ctd
 
             self.PRES_ctd = self.PRES_ctd[l_id,:]
             self.TEMP_ctd = self.TEMP_ctd[l_id,:]
             self.SALT_ctd = self.SALT_ctd[l_id,:]
             self.COND_ctd = self.COND_ctd[l_id,:]
-            self.TURB_ctd = self.TURB_ctd[l_id,:]
-            self.DO_ctd = self.DO_ctd[l_id,:]
+            # self.TURB_ctd = self.TURB_ctd[l_id]
+            self.oxy_ctd = self.oxy_ctd[l_id,:]
             self.FLUO_ctd = self.FLUO_ctd[l_id,:]
-            self.CDOM_ctd = self.CDOM_ctd[l_id,:]
+            # self.CDOM_ctd = self.CDOM_ctd[l_id]
             self.LAT_ctd = self.LAT_ctd[l_id,:]
             self.LON_ctd = self.LON_ctd[l_id,:]
-            self.DATETIME_ctd = np.array(self.DATETIME_ctd)[l_id2]
+            self.DATETIME_ctd = np.array(self.DATETIME_ctd)[l_id]
 
 
     def plot_vertical_speed(self,id=None,window=20):
@@ -1220,35 +1270,56 @@ class Analyzer:
         if id_mvp == []:
             id_mvp = list(range(0, self.PRES_mvp.shape[0]))
         if id_ctd is None:
-            id_ctd = id_mvp
+            if len(self.PRES_ctd) == len(self.PRES_mvp)//2:
+                id_ctd = list(range(0, self.PRES_ctd.shape[0]))
+                id_ctd1 = list(range(0, self.PRES_ctd.shape[0]))
+            elif len(self.PRES_ctd) == len(self.PRES_mvp):
+                id_ctd = id_mvp
 
         if len(id_mvp) != len(id_ctd):
-            raise ValueError("id_mvp and id_ctd must have the same length.")
+            if not len(id_mvp)//2 == len(id_ctd):
+                raise ValueError("Length of id_mvp and id_ctd must be the same or id_ctd must be half the length of id_mvp.")
+        else:
+            # keep only down profiles
+            id_ctd1 = [id_ctd[i] for i in range(len(id_ctd)) if id_ctd[i]%2 == 0]
 
         if correction:
             Pres = self.PRES_mvp_corr
             Temp = self.TEMP_mvp_corr
             Salt = self.SALT_mvp_corr
             Cond = self.COND_mvp_corr
+            oxy  = self.oxy
+
         else:
             Pres = self.PRES_mvp
             Temp = self.TEMP_mvp
             Salt = self.SALT_mvp
             Cond = self.COND_mvp
-        oxy = self.oxy
+            oxy = self.DO_mvp
 
         # Interpolate MVP and CTD data to match pressure levels
-        pmin = np.nanmin(Pres)
-        pmax = np.nanmax(Pres)
+        pmin = 5
+        pmax = 1000
         pressure_grid = np.linspace(pmin, pmax, num_sample)
 
-        TEMP_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:],Temp[id_mvp,:], pressure_grid)
-        SALT_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], Salt[id_mvp,:], pressure_grid)
-        oxy_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], oxy[id_mvp,:], pressure_grid)
-        COND_mvp_interp = mvp.vertical_interp(Pres[id_mvp,:], Cond[id_mvp,:], pressure_grid) 
+        if correction:
+            TEMP_mvp_interp = []
+            SALT_mvp_interp = []
+            oxy_mvp_interp = []
+            COND_mvp_interp = []
+            for i in id_mvp:
+                TEMP_mvp_interp.append(np.interp(pressure_grid, Pres[i], Temp[i]))
+                SALT_mvp_interp.append(np.interp(pressure_grid, Pres[i], Salt[i]))
+                oxy_mvp_interp.append(np.interp(pressure_grid, Pres[i], oxy[i]))
+                COND_mvp_interp.append(np.interp(pressure_grid, Pres[i], Cond[i]))
 
-        # keep only down profiles
-        id_ctd1 = [id_ctd[i] for i in range(len(id_ctd)) if id_ctd[i]%2 == 0]
+        else:
+            TEMP_mvp_interp = mvp.vertical_interp(Pres[id_mvp],Temp[id_mvp], pressure_grid)
+            SALT_mvp_interp = mvp.vertical_interp(Pres[id_mvp], Salt[id_mvp], pressure_grid)
+            oxy_mvp_interp = mvp.vertical_interp(Pres[id_mvp], oxy[id_mvp], pressure_grid)
+            COND_mvp_interp = mvp.vertical_interp(Pres[id_mvp], Cond[id_mvp], pressure_grid) 
+
+            
  
         TEMP_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.TEMP_ctd[id_ctd1,:], pressure_grid)
         SALT_ctd_interp = mvp.vertical_interp(self.PRES_ctd[id_ctd1,:],self.SALT_ctd[id_ctd1,:], pressure_grid)
@@ -1272,14 +1343,14 @@ class Analyzer:
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
         # Compute mean error along profiles (axis=0: profiles, axis=1: depth)
-        mean_temp_down = np.absolute(np.nanmean(diff_temp_down, axis=0))
-        mean_temp_up =  np.absolute(np.nanmean(diff_temp_up, axis=0))
-        mean_salt_down =  np.absolute(np.nanmean(diff_salt_down, axis=0))
-        mean_salt_up =  np.absolute(np.nanmean(diff_salt_up, axis=0))
-        mean_oxy_down =  np.absolute(np.nanmean(diff_oxy_down, axis=0))
-        mean_oxy_up =  np.absolute(np.nanmean(diff_oxy_up, axis=0))
-        mean_cond_down =  np.absolute(np.nanmean(diff_cond_down, axis=0))
-        mean_cond_up =  np.absolute(np.nanmean(diff_cond_up, axis=0))
+        mean_temp_down = np.nanmean(np.absolute(diff_temp_down), axis=0)
+        mean_temp_up =  np.nanmean(np.absolute(diff_temp_up), axis=0)
+        mean_salt_down =  np.nanmean(np.absolute(diff_salt_down), axis=0)
+        mean_salt_up =  np.nanmean(np.absolute(diff_salt_up), axis=0)
+        mean_oxy_down =  np.nanmean(np.absolute(diff_oxy_down), axis=0)
+        mean_oxy_up =  np.nanmean(np.absolute(diff_oxy_up), axis=0)
+        mean_cond_down =  np.nanmean(np.absolute(diff_cond_down), axis=0)
+        mean_cond_up =  np.nanmean(np.absolute(diff_cond_up), axis=0)
 
         axes[0].plot(mean_temp_down, pressure_grid, label='Down')
         axes[0].plot(mean_temp_up, pressure_grid, label='Up')
@@ -1330,7 +1401,7 @@ class Analyzer:
             axes[2].plot(mean_oxy_down, pressure_grid, label='Down')
             axes[2].plot(mean_oxy_up, pressure_grid, label='Up')
             axes[2].invert_yaxis()
-            axes[2].set_xlabel('Absolute Mean Error (%)')
+            axes[2].set_xlabel('Absolute Mean Error (umol/L)')
             axes[2].set_ylabel('Pressure (dbar)')
             axes[2].set_title('Oxygen Error')
             axes[2].legend()
@@ -1390,7 +1461,7 @@ class Analyzer:
             [temp_rmse,  salt_rmse,  oxy_rmse],
             [temp_rmse_deep, salt_rmse_deep, oxy_rmse_deep],
             ['Temperature', 'Salinity', 'Oxygen'],
-            ['RMSE (°C)', 'RMSE (psu)', 'RMSE (%)']
+            ['RMSE (°C)', 'RMSE (psu)', 'RMSE (umol/L)']
         )):
             x = np.arange(len(labels))
             width = 0.35
@@ -1434,6 +1505,296 @@ class Analyzer:
             print("Conductivity RMSE (MVP - CTD):")
             print(f"  MVP down: {rmse_cond_down:.4f} S/m (deep: {rmse_cond_down_deep:.4f} S/m)")
             print(f"  MVP up:   {rmse_cond_up:.4f} S/m (deep: {rmse_cond_up_deep:.4f} S/m)")
+
+
+
+        print('TEMPERATURE')
+        fig, ax = plt.subplots(figsize=(6, 8))
+        for i in range(diff_temp_down.shape[0]):
+            ax.plot(diff_temp_down[i], pressure_grid, color='blue', alpha=0.15, linewidth=0.8)
+        ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+        ax.invert_yaxis()
+        ax.set_xlabel('Erreur (MVP - CTD) °C')
+        ax.set_ylabel('Pressure (dbar)')
+        ax.set_title('Toutes les différences individuelles (Down)')
+        ax.grid()
+        plt.show()
+
+
+
+        p50 = np.nanpercentile(diff_temp_down, 50, axis=0)
+        p25 = np.nanpercentile(diff_temp_down, 25, axis=0)
+        p75 = np.nanpercentile(diff_temp_down, 75, axis=0)
+        p05 = np.nanpercentile(diff_temp_down, 5, axis=0)
+        p95 = np.nanpercentile(diff_temp_down, 95, axis=0)
+
+        fig, ax = plt.subplots(figsize=(6, 8))
+        ax.fill_betweenx(pressure_grid, p05, p95, color='blue', alpha=0.15, label='5-95%')
+        ax.fill_betweenx(pressure_grid, p25, p75, color='blue', alpha=0.35, label='25-75%')
+        ax.plot(p50, pressure_grid, color='blue', label='Médiane')
+        ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+        ax.invert_yaxis()
+        ax.set_xlabel('Erreur (MVP - CTD) °C')
+        ax.set_ylabel('Pressure (dbar)')
+        ax.legend()
+        ax.grid()
+        plt.show()
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        vmax = np.nanpercentile(np.abs(diff_temp_down), 95)
+        pc = ax.pcolormesh(np.arange(diff_temp_down.shape[0]), pressure_grid, diff_temp_down.T,
+                            cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+        ax.invert_yaxis()
+        ax.set_xlabel('Index profil')
+        ax.set_ylabel('Pressure (dbar)')
+        fig.colorbar(pc, label='Erreur (°C)')
+        plt.show()
+
+
+        depth_bins = np.arange(0, 1000, 100)
+        bin_idx = np.digitize(pressure_grid, depth_bins)
+
+        data_by_bin = [diff_temp_down[:, bin_idx == b].flatten() for b in range(1, len(depth_bins))]
+        data_by_bin = [d[~np.isnan(d)] for d in data_by_bin]
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.boxplot(data_by_bin, positions=depth_bins[:-1] + 50, widths=60, vert=False, showfliers=True)
+        ax.invert_yaxis()
+        ax.axvline(0, color='r', linestyle='--')
+        ax.set_xlabel('Erreur (°C)')
+        ax.set_ylabel('Pressure (dbar)')
+        plt.show()
+
+        fig, ax = plt.subplots()
+        ax.hist(diff_temp_down.flatten(), bins=100, color='blue', alpha=0.7)
+        ax.axvline(0, color='k', linestyle='--')
+        ax.axvline(np.nanmean(diff_temp_down), color='r', label=f'Moyenne={np.nanmean(diff_temp_down):.3f}')
+        ax.axvline(np.nanmedian(diff_temp_down), color='g', label=f'Médiane={np.nanmedian(diff_temp_down):.3f}')
+        ax.set_xlabel('Erreur (°C)')
+        ax.legend()
+        plt.show()
+
+        if cond:
+            print('CONDUCTIVITY')
+
+            fig, ax = plt.subplots(figsize=(6, 8))
+            for i in range(diff_cond_down.shape[0]):
+                ax.plot(diff_cond_down[i], pressure_grid, color='blue', alpha=0.15, linewidth=0.8)
+            ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+            ax.invert_yaxis()
+            ax.set_xlabel('Erreur (MVP - CTD) S/m')
+            ax.set_ylabel('Pressure (dbar)')
+            ax.set_title('Toutes les différences individuelles (Down)')
+            ax.grid()
+            plt.show()
+
+
+
+            p50 = np.nanpercentile(diff_cond_down, 50, axis=0)
+            p25 = np.nanpercentile(diff_cond_down, 25, axis=0)
+            p75 = np.nanpercentile(diff_cond_down, 75, axis=0)
+            p05 = np.nanpercentile(diff_cond_down, 5, axis=0)
+            p95 = np.nanpercentile(diff_cond_down, 95, axis=0)
+
+            fig, ax = plt.subplots(figsize=(6, 8))
+            ax.fill_betweenx(pressure_grid, p05, p95, color='blue', alpha=0.15, label='5-95%')
+            ax.fill_betweenx(pressure_grid, p25, p75, color='blue', alpha=0.35, label='25-75%')
+            ax.plot(p50, pressure_grid, color='blue', label='Médiane')
+            ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+            ax.invert_yaxis()
+            ax.set_xlabel('Erreur (MVP - CTD) S/m')
+            ax.set_ylabel('Pressure (dbar)')
+            ax.legend()
+            ax.grid()
+            plt.show()
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            vmax = np.nanpercentile(np.abs(diff_cond_down), 95)
+            pc = ax.pcolormesh(np.arange(diff_cond_down.shape[0]), pressure_grid, diff_cond_down.T,
+                                cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+            ax.invert_yaxis()
+            ax.set_xlabel('Index profil')
+            ax.set_ylabel('Pressure (dbar)')
+            fig.colorbar(pc, label='Erreur (S/m)')
+            plt.show()
+
+
+            depth_bins = np.arange(0, 1000, 100)
+            bin_idx = np.digitize(pressure_grid, depth_bins)
+
+            data_by_bin = [diff_cond_down[:, bin_idx == b].flatten() for b in range(1, len(depth_bins))]
+            data_by_bin = [d[~np.isnan(d)] for d in data_by_bin]
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.boxplot(data_by_bin, positions=depth_bins[:-1] + 50, widths=60, vert=False, showfliers=True)
+            ax.invert_yaxis()
+            ax.axvline(0, color='r', linestyle='--')
+            ax.set_xlabel('Erreur (S/m)')
+            ax.set_ylabel('Pressure (dbar)')
+            plt.show()
+
+            fig, ax = plt.subplots()
+            ax.hist(diff_cond_down.flatten(), bins=100, color='blue', alpha=0.7)
+            ax.axvline(0, color='k', linestyle='--')
+            ax.axvline(np.nanmean(diff_cond_down), color='r', label=f'Moyenne={np.nanmean(diff_cond_down):.3f}')
+            ax.axvline(np.nanmedian(diff_cond_down), color='g', label=f'Médiane={np.nanmedian(diff_cond_down):.3f}')
+            ax.set_xlabel('Erreur (S/m)')
+            ax.legend()
+            plt.show()
+
+
+
+
+        print('SALINTY')
+        fig, ax = plt.subplots(figsize=(6, 8))
+        for i in range(diff_salt_down.shape[0]):
+            ax.plot(diff_salt_down[i], pressure_grid, color='blue', alpha=0.15, linewidth=0.8)
+        ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+        ax.invert_yaxis()
+        ax.set_xlabel('Erreur (MVP - CTD) PSU')
+        ax.set_ylabel('Pressure (dbar)')
+        ax.set_title('Toutes les différences individuelles (Down)')
+        ax.grid()
+        plt.show()
+
+
+
+        p50 = np.nanpercentile(diff_salt_down, 50, axis=0)
+        p25 = np.nanpercentile(diff_salt_down, 25, axis=0)
+        p75 = np.nanpercentile(diff_salt_down, 75, axis=0)
+        p05 = np.nanpercentile(diff_salt_down, 5, axis=0)
+        p95 = np.nanpercentile(diff_salt_down, 95, axis=0)
+
+        fig, ax = plt.subplots(figsize=(6, 8))
+        ax.fill_betweenx(pressure_grid, p05, p95, color='blue', alpha=0.15, label='5-95%')
+        ax.fill_betweenx(pressure_grid, p25, p75, color='blue', alpha=0.35, label='25-75%')
+        ax.plot(p50, pressure_grid, color='blue', label='Médiane')
+        ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+        ax.invert_yaxis()
+        ax.set_xlabel('Erreur (MVP - CTD) PSU')
+        ax.set_ylabel('Pressure (dbar)')
+        ax.legend()
+        ax.grid()
+        plt.show()
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        vmax = np.nanpercentile(np.abs(diff_salt_down), 95)
+        pc = ax.pcolormesh(np.arange(diff_salt_down.shape[0]), pressure_grid, diff_salt_down.T,
+                            cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+        ax.invert_yaxis()
+        ax.set_xlabel('Index profil')
+        ax.set_ylabel('Pressure (dbar)')
+        fig.colorbar(pc, label='Erreur (PSU)')
+        plt.show()
+
+
+        depth_bins = np.arange(0, 1000, 100)
+        bin_idx = np.digitize(pressure_grid, depth_bins)
+
+        data_by_bin = [diff_salt_down[:, bin_idx == b].flatten() for b in range(1, len(depth_bins))]
+        data_by_bin = [d[~np.isnan(d)] for d in data_by_bin]
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.boxplot(data_by_bin, positions=depth_bins[:-1] + 50, widths=60, vert=False, showfliers=True)
+        ax.invert_yaxis()
+        ax.axvline(0, color='r', linestyle='--')
+        ax.set_xlabel('Erreur (PSU)')
+        ax.set_ylabel('Pressure (dbar)')
+        plt.show()
+
+        fig, ax = plt.subplots()
+        ax.hist(diff_salt_down.flatten(), bins=100, color='blue', alpha=0.7)
+        ax.axvline(0, color='k', linestyle='--')
+        ax.axvline(np.nanmean(diff_salt_down), color='r', label=f'Moyenne={np.nanmean(diff_salt_down):.3f}')
+        ax.axvline(np.nanmedian(diff_salt_down), color='g', label=f'Médiane={np.nanmedian(diff_salt_down):.3f}')
+        ax.set_xlabel('Erreur (PSU)')
+        ax.legend()
+        plt.show()
+
+
+
+
+
+
+        print('OXYGEN')
+        fig, ax = plt.subplots(figsize=(6, 8))
+        for i in range(diff_oxy_down.shape[0]):
+            ax.plot(diff_oxy_down[i], pressure_grid, color='blue', alpha=0.15, linewidth=0.8)
+        ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+        ax.invert_yaxis()
+        ax.set_xlabel('Erreur (MVP - CTD) umol/L')
+        ax.set_ylabel('Pressure (dbar)')
+        ax.set_title('Toutes les différences individuelles (Down)')
+        ax.grid()
+        plt.show()
+
+
+
+        p50 = np.nanpercentile(diff_oxy_down, 50, axis=0)
+        p25 = np.nanpercentile(diff_oxy_down, 25, axis=0)
+        p75 = np.nanpercentile(diff_oxy_down, 75, axis=0)
+        p05 = np.nanpercentile(diff_oxy_down, 5, axis=0)
+        p95 = np.nanpercentile(diff_oxy_down, 95, axis=0)
+
+        # Régression linéaire sur la médiane (erreur = a * pression + b)
+        mask = ~np.isnan(p50)
+        slope, intercept = np.polyfit(pressure_grid[mask], p50[mask], 1)
+
+        fit_line = slope * pressure_grid + intercept
+
+        print(f"Pente de l'erreur médiane en oxygène : {slope:.5f} umol/L par dbar")
+        print(f"  (soit {slope*100:.3f} umol/L / 100 dbar)")
+        print(f"Ordonnée à l'origine : {intercept:.4f} umol/L")
+
+        fig, ax = plt.subplots(figsize=(6, 8))
+        ax.fill_betweenx(pressure_grid, p05, p95, color='blue', alpha=0.15, label='5-95%')
+        ax.fill_betweenx(pressure_grid, p25, p75, color='blue', alpha=0.35, label='25-75%')
+        ax.plot(p50, pressure_grid, color='blue', label='Médiane')
+        ax.plot(fit_line, pressure_grid, color='red', linestyle='--', linewidth=1.5,
+                label=f'Tendance: {slope:.5f} umol/L/dbar')
+        ax.axvline(0, color='k', linestyle='--', linewidth=0.8)
+        ax.invert_yaxis()
+        ax.set_xlabel('Erreur (MVP - CTD) umol/L')
+        ax.set_ylabel('Pressure (dbar)')
+        ax.set_title('Oxygène — Erreur médiane et tendance linéaire')
+        ax.legend()
+        ax.grid()
+        plt.show()
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        vmax = np.nanpercentile(np.abs(diff_oxy_down), 95)
+        pc = ax.pcolormesh(np.arange(diff_oxy_down.shape[0]), pressure_grid, diff_oxy_down.T,
+                            cmap='RdBu_r', vmin=-vmax, vmax=vmax, shading='auto')
+        ax.invert_yaxis()
+        ax.set_xlabel('Index profil')
+        ax.set_ylabel('Pressure (dbar)')
+        fig.colorbar(pc, label='Erreur (umol/L)')
+        plt.show()
+
+
+        depth_bins = np.arange(0, 1000, 100)
+        bin_idx = np.digitize(pressure_grid, depth_bins)
+
+        data_by_bin = [diff_oxy_down[:, bin_idx == b].flatten() for b in range(1, len(depth_bins))]
+        data_by_bin = [d[~np.isnan(d)] for d in data_by_bin]
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.boxplot(data_by_bin, positions=depth_bins[:-1] + 50, widths=60, vert=False, showfliers=True)
+        ax.invert_yaxis()
+        ax.axvline(0, color='r', linestyle='--')
+        ax.set_xlabel('Erreur (umol/L)')
+        ax.set_ylabel('Pressure (dbar)')
+        plt.show()
+
+        fig, ax = plt.subplots()
+        ax.hist(diff_oxy_down.flatten(), bins=100, color='blue', alpha=0.7)
+        ax.axvline(0, color='k', linestyle='--')
+        ax.axvline(np.nanmean(diff_oxy_down), color='r', label=f'Moyenne={np.nanmean(diff_oxy_down):.3f}')
+        ax.axvline(np.nanmedian(diff_oxy_down), color='g', label=f'Médiane={np.nanmedian(diff_oxy_down):.3f}')
+        ax.set_xlabel('Erreur (umol/L)')
+        ax.legend()
+        plt.show()
+
 
     def correct_oxygen(self,id_mvp=None,id_ctd=None,plotting=False,):
         """
@@ -1519,6 +1880,19 @@ class Analyzer:
 
         print("Oxygen correction applied to all MVP profiles using nearest CTD profiles.")
 
+    def correct_oxygen_with_slope(self,slope):
+        """
+        Apply oxygen correction to all MVP profiles using a specified slope.
+        Args:
+            slope (float): Slope  coefficient for the linear correction: oxy_new = oxy_old - slope * pressure
+        """
+        if self.corrected:
+            for i in range(len(self.oxy.keys())):
+                self.oxy[i] = self.oxy[i] - slope * self.PRES_mvp_corr[i]
+        else:
+            for i in range(len(self.oxy.keys())):
+                self.oxy[i] = self.oxy[i] - slope * self.PRES_mvp[i]
+
     def convert_DO_to_umolL(self,correction=False):
         """
         Convert dissolved oxygen from percentage saturation to µmol/L
@@ -1537,8 +1911,8 @@ class Analyzer:
             if correction:
                 sal = self.SALT_mvp_corr[id_mvp]
                 pres = self.PRES_mvp_corr[id_mvp]
-                Lon = self.Lon_mvp[id_mvp][:len(pres)]
-                Lat = self.Lat_mvp[id_mvp][:len(pres)]
+                Lon = np.full_like(pres, self.LON_mvp[id_mvp][0])
+                Lat = np.full_like(pres, self.LAT_mvp[id_mvp][0])
                 temp = self.TEMP_mvp_corr[id_mvp]
                 # interpolate self.DO_mvp to self.PRES_mvp_corr
                 sort_idx = np.argsort(self.PRES_mvp[id_mvp])
@@ -1549,8 +1923,8 @@ class Analyzer:
             else:
                 sal = self.SALT_mvp[id_mvp]
                 pres = self.PRES_mvp[id_mvp]
-                Lon = self.LON_mvp[id_mvp]
-                Lat = self.LAT_mvp[id_mvp]
+                Lon = np.full_like(pres, self.LON_mvp[id_mvp][0])
+                Lat = np.full_like(pres, self.LAT_mvp[id_mvp][0])
                 temp = self.TEMP_mvp[id_mvp]
                 do = self.DO_mvp[id_mvp]
 
@@ -1558,7 +1932,7 @@ class Analyzer:
             CT = gsw.CT_from_pt(SA, temp)
             rho = gsw.rho(SA, CT, pres)  # Density in kg/m^3
             oxy_sat = gsw.O2sol_SP_pt(sal, temp) * rho /1000
-            oxy[id_mvp] = do * oxy_sat / 100
+            oxy[id_mvp] = do * oxy_sat / 100 +self.oxy_offset
 
         self.oxy = oxy
 
@@ -1747,7 +2121,6 @@ class Analyzer:
         self.SUNA=True
         print("SUNA data processed and stored in the object.")
 
-        
 
 
     def interpolate_CTD_and_MVPcorrected(self,length):

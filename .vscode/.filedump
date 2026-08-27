@@ -1,6 +1,6 @@
 
 		begin
-      f = addfile("/home/maxw/Documents/PyMVP/examples_perso/test.nc","r")
+      f = addfile("/home/maxw/Documents/PyMVP/examples_perso/section_2_3_SAL.nc","r")
       print(f)
 		end
     

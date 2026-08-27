@@ -10,6 +10,7 @@ from netCDF4 import Dataset
 from scipy.signal import butter, filtfilt, correlate, correlation_lags,savgol_filter
 from typing import Optional
 import re
+import pandas as pd
 
 def get_log(mvp_log_name,Yorig):
 
@@ -1308,3 +1309,43 @@ def correct_suna(suna,pres,coeff=None,offset=0):
     
 
     return corrected_suna
+
+
+def read_cnv(filename):
+
+    names = []
+    end_line = None
+
+    with open(filename) as f:
+
+        for i, line in enumerate(f):
+
+            if line.startswith("* NMEA UTC "):
+                m = re.search(r'= (\w+ \d+ \d+ +\d+:\d+:\d+)', line)
+                if m:
+                    datetime_str = m.group(1)
+                    datetime_str = re.sub(r' +', ' ', datetime_str)
+                    nmea_datetime = datetime.strptime(datetime_str, "%b %d %Y %H:%M:%S")
+
+            elif line.startswith("# name"):
+
+                m = re.search(r"# name\s+\d+\s*=\s*([^:]+)", line)
+
+                if m:
+                    names.append(m.group(1).strip())
+
+            elif line.strip() == "*END*":
+                end_line = i + 1
+                break
+
+    if end_line is None:
+        raise ValueError("*END* not found")
+
+    df = pd.read_csv(
+        filename,
+        sep=r"\s+",
+        skiprows=end_line,
+        names=names
+    )
+
+    return df,nmea_datetime

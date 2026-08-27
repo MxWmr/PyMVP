@@ -1,9 +1,4 @@
 __pycache__/
-examples/
 examples_perso/
-trait_essai.ipynb
-.gitignore
-mvp_corrected/
-*.nc
-*.ipynb
-*.csv
+rapport/
+.vscode/
