@@ -60,7 +60,7 @@ class Analyzer:
         self.dist = False
 
     def ___version___(self):
-        return "0.3.2"
+        return "1.0.0"
 
 
     def load_mvp_data(self,data_path, delp=[], subdirs=False,format='raw',only_new=False, output_path=None,outlier_temp=35,outlier_cond=55,offset_cond=0,offset_temp=0,offset_oxy=0):
