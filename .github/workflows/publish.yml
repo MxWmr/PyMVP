@@ -1,6 +1,6 @@
 name: Publish Python package
 
-on:
+on:v1.0
   push:
     tags:
       - "v*"
